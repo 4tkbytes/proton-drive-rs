@@ -1,7 +1,6 @@
 [workspace]
 resolver = "3"
-members = [ "proton-bindings","proton-ffi","proton-sdk-rs"]
+members = [ "proton-bindings", "proton-sdk-rs" , "proton-sdk-sys" ]
 
 [workspace.dependencies]
-interoptopus = "0.14"
-serde = { version = "*", features = ["derive"] }
+libc = "0.2"

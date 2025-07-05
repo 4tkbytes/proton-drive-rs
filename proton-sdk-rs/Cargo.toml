@@ -2,6 +2,13 @@
 name = "proton-sdk-rs"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "A rust binding for the Proton Apps SDK such as Proton Drive. Currently a WIP"
+repository = "https://github.com/4tkbytes/proton-sdk-rs"
+readme = "README.md"
+
+[features]
+drive = []
 
 [dependencies]
-proton-ffi = { path = "../proton-ffi" }
+# proton-sdk-sys = { path = "../proton-sdk-sys" }
