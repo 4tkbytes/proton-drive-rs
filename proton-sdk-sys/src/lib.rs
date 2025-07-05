@@ -11,7 +11,6 @@ fn call_dyn() {
 fn get_library_path() -> PathBuf{
     let base_dir = PathBuf::from("../native-libs");
     
-    // Try different library names based on OS and what's available
     let possible_libraries = if cfg!(target_os = "windows") {
         vec![
             "proton_sdk.dll",
@@ -21,20 +20,20 @@ fn get_library_path() -> PathBuf{
         ]
     } else if cfg!(target_os = "linux") {
         vec![
-            "libproton_sdk.dll",    // .NET on Linux still produces .dll
-            "libproton_sdk.so",     // Native Linux
+            "libproton_sdk.dll",
+            "libproton_sdk.so",
             "proton_sdk.dll",
             "proton_sdk.so",
         ]
     } else if cfg!(target_os = "macos") {
         vec![
             "libproton_sdk.dylib",
-            "libproton_sdk.dll",    // .NET on macOS might produce .dll
+            "libproton_sdk.dll",
             "proton_sdk.dylib",
             "proton_sdk.dll",
         ]
     } else {
-        vec!["libproton_sdk.dll", "proton_sdk.dll"] // Fallback
+        vec!["libproton_sdk.dll", "proton_sdk.dll"]
     };
     
     // Try each possible library name until we find one that exists
