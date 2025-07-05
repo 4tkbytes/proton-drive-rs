@@ -246,6 +246,115 @@ class BuildScript:
             
             self.run_command(f"git clone {repo_url}")
     
+    def build_go_crypto(self, crypto_dir):
+        """Build Go cryptography library using integrated build logic"""
+        print(f"{Colors.BLUE}Building Go cryptography library...{Colors.END}")
+        
+        # Build modes to compile
+        build_modes = ["c-shared", "c-archive"]
+        
+        # Architecture and OS mappings
+        arch_rid_map = {"386": "x86", "amd64": "x64", "arm64": "arm64"}
+        os_rid_map = {
+            "windows": "win", 
+            "darwin": "osx", 
+            "linux": "linux", 
+            "android": "linux-bionic", 
+            "ios": "ios"
+        }
+        
+        # Convert Python arch naming to Go arch naming
+        go_arch = self.arch  # amd64, arm64, 386
+        go_os = "darwin" if self.os_name == "macos" else self.os_name
+        
+        # Get runtime identifier
+        runtime_id = f"{os_rid_map[go_os]}-{arch_rid_map[go_arch]}"
+        
+        # Set up Go environment variables
+        go_env = os.environ.copy()
+        go_env.update({
+            "GOFLAGS": "-trimpath",
+            "CGO_ENABLED": "1",
+            "CGO_LDFLAGS": "-s -w",
+            "GOOS": go_os,
+            "GOARCH": go_arch,
+            "CC": "gcc"
+        })
+        
+        lib_name = "proton_crypto"
+        output_dir_path = crypto_dir / "bin" / "runtimes" / runtime_id / "native"
+        output_dir_path.mkdir(parents=True, exist_ok=True)
+        
+        go_src_dir = crypto_dir / "src" / "go"
+        if not go_src_dir.exists():
+            print(f"{Colors.YELLOW}Go source directory not found at {go_src_dir}, skipping Go build{Colors.END}")
+            return
+        
+        for build_mode in build_modes:
+            # Determine output file name based on OS and build mode
+            if go_os == "windows":
+                if build_mode == "c-shared":
+                    output_file_name = f"{lib_name}.dll"
+                else:
+                    output_file_name = f"{lib_name}.lib"
+            elif go_os == "linux":
+                if build_mode == "c-shared":
+                    output_file_name = f"lib{lib_name}.so"
+                else:
+                    output_file_name = f"lib{lib_name}.a"
+            elif go_os == "android":
+                if build_mode == "c-shared":
+                    output_file_name = f"lib{lib_name}.so"
+                    go_env["CGO_LDFLAGS"] = f"-Wl,-soname,{output_file_name}"
+                else:
+                    print(f"{Colors.YELLOW}Skipping unsupported {build_mode} mode for {go_os}/{go_arch}{Colors.END}")
+                    continue
+            elif go_os == "darwin":
+                if build_mode == "c-shared":
+                    output_file_name = f"{lib_name}.dylib"
+                else:
+                    output_file_name = f"{lib_name}.a"
+            elif go_os == "ios":
+                if build_mode == "c-shared":
+                    print(f"{Colors.YELLOW}Skipping unsupported {build_mode} mode for {go_os}/{go_arch}{Colors.END}")
+                    continue
+                else:
+                    output_file_name = f"{lib_name}.a"
+            else:
+                print(f"{Colors.YELLOW}Unknown OS {go_os}, using default naming{Colors.END}")
+                output_file_name = f"lib{lib_name}.so"
+            
+            output_file_path = output_dir_path / output_file_name
+            
+            print(f"{Colors.BLUE}Building for {go_os}/{go_arch} in {build_mode} mode -> {output_file_path}{Colors.END}")
+            
+            # Build the Go library
+            cmd = [
+                "go", "build", 
+                f"-C", str(go_src_dir),
+                f"-buildmode={build_mode}",
+                "-o", str(output_file_path)
+            ]
+            
+            try:
+                result = subprocess.run(
+                    cmd,
+                    env=go_env,
+                    cwd=crypto_dir,
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                print(f"{Colors.GREEN}✓ Successfully built {output_file_name}{Colors.END}")
+            except subprocess.CalledProcessError as e:
+                print(f"{Colors.RED}Go build failed for {build_mode}:{Colors.END} {e}")
+                if e.stdout:
+                    print(f"{Colors.YELLOW}Stdout:{Colors.END} {e.stdout}")
+                if e.stderr:
+                    print(f"{Colors.RED}Stderr:{Colors.END} {e.stderr}")
+                # Don't exit, try other build modes
+                continue
+    
     def build_dotnet_crypto(self):
         """Build dotnet-crypto package"""
         print(f"{Colors.BOLD}{Colors.CYAN}=== Building dotnet-crypto ==={Colors.END}")
@@ -253,35 +362,8 @@ class BuildScript:
         crypto_dir = self.base_dir / "dotnet-crypto"
         os.chdir(crypto_dir)
         
-        # Run build script
-        build_script_path = crypto_dir / "build" / "build-go.sh"
-        if build_script_path.exists():
-            try:
-                # Fix line endings for Unix systems (convert CRLF to LF)
-                if self.os_name != 'windows':
-                    print(f"{Colors.YELLOW}Converting line endings for Unix compatibility...{Colors.END}")
-                    try:
-                        self.run_command(f"dos2unix {build_script_path}", capture_output=True)
-                    except subprocess.CalledProcessError:
-                        # Fallback: manual line ending conversion
-                        print(f"{Colors.YELLOW}dos2unix failed, trying manual conversion...{Colors.END}")
-                        with open(build_script_path, 'rb') as f:
-                            content = f.read()
-                        content = content.replace(b'\r\n', b'\n')
-                        with open(build_script_path, 'wb') as f:
-                            f.write(content)
-                
-                # Make script executable
-                self.run_command(f"chmod +x {build_script_path}", capture_output=True)
-                
-                # Run the build script with bash explicitly
-                self.run_command(f"bash ./build/build-go.sh {self.os_name}/{self.arch}")
-            except subprocess.CalledProcessError as e:
-                print(f"{Colors.RED}Go build script failed:{Colors.END} {e}")
-                sys.exit(1)
-                # print(f"{Colors.YELLOW}Continuing without Go build - this may affect cryptography functionality{Colors.END}")
-        else:
-            print(f"{Colors.YELLOW}Build script build/build-go.sh not found, skipping go build{Colors.END}")
+        # Build Go cryptography library using integrated logic
+        self.build_go_crypto(crypto_dir)
         
         # Create local nuget repository
         local_nuget_temp = crypto_dir / "local-nuget-repository"
