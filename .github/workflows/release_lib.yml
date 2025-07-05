@@ -15,6 +15,7 @@ jobs:
     name: Build and Release Native Libraries
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
