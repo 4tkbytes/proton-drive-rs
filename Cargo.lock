@@ -25,10 +25,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proton-bindings"
-version = "0.1.0"
-
-[[package]]
 name = "proton-sdk-rs"
 version = "0.1.0"
 
