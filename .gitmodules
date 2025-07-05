@@ -1,0 +1,3 @@
+[submodule "Proton.SDK"]
+	path = Proton.SDK
+	url = git@github.com:4tkbytes/Proton.SDK
