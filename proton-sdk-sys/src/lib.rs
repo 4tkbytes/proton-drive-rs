@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use std::env;
 
-/// Detect the current runtime identifier
 #[allow(dead_code)]
 fn get_runtime_id() -> String {
     let os = if cfg!(target_os = "windows") {
@@ -28,13 +27,11 @@ fn get_runtime_id() -> String {
     format!("{}-{}", os, arch)
 }
 
-/// Find the workspace root directory
 #[allow(dead_code)]
 fn find_workspace_root() -> Option<PathBuf> {
     let mut current = env::current_dir().ok()?;
     
     loop {
-        // Look for workspace indicators
         if current.join("Cargo.toml").exists() && 
            current.join("proton-sdk-sys").exists() {
             return Some(current);
@@ -50,7 +47,6 @@ fn find_workspace_root() -> Option<PathBuf> {
     None
 }
 
-/// Attempt to load the Proton SDK library dynamically
 #[allow(dead_code)]
 fn call_dyn() -> Result<(), Box<dyn std::error::Error>> {
     let runtime_id = get_runtime_id();
@@ -165,11 +161,9 @@ mod tests {
         let runtime_id = get_runtime_id();
         println!("Detected runtime: {}", runtime_id);
         
-        // Basic sanity checks
         assert!(runtime_id.contains("-"));
         assert!(runtime_id.len() > 3);
         
-        // Should match expected patterns
         let valid_patterns = [
             "win-x64", "win-x86", "win-arm64",
             "linux-x64", "linux-arm64", 
