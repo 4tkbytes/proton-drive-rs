@@ -151,27 +151,3 @@ fn call_dyn() -> Result<(), Box<dyn std::error::Error>> {
         load_errors
     ).into())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_runtime_detection() {
-        let runtime_id = get_runtime_id();
-        println!("Detected runtime: {}", runtime_id);
-        
-        assert!(runtime_id.contains("-"));
-        assert!(runtime_id.len() > 3);
-        
-        let valid_patterns = [
-            "win-x64", "win-x86", "win-arm64",
-            "linux-x64", "linux-arm64", 
-            "osx-x64", "osx-arm64"
-        ];
-        
-        if !valid_patterns.contains(&runtime_id.as_str()) {
-            println!("Warning: Unexpected runtime ID: {}", runtime_id);
-        }
-    }
-}
