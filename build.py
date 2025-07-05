@@ -68,16 +68,18 @@ class BuildScript:
         self.arch = arch or self._detect_arch()
         self.os_name = self._detect_os()
         self.local_nuget_repo = Path.home() / "local-nuget-repository"
-        self.required_tools = ['git', 'dotnet', 'cargo', 'rustc', 'go']
+        self.required_tools = ['git', 'dotnet', 'cargo', 'rustc', 'go', 'gcc']
         self.optional_tools = ['dos2unix']  # Tools that are helpful but not required
         
     def _detect_arch(self):
         """Detect system architecture"""
         machine = platform.machine().lower()
         if machine in ['x86_64', 'amd64']:
-            return 'x64'
+            return 'amd64'  # Use Go architecture naming
         elif machine in ['aarch64', 'arm64']:
             return 'arm64'
+        elif machine in ['i386', 'i686', 'x86']:
+            return '386'  # Go uses 386 for 32-bit x86
         else:
             return machine
     
@@ -93,30 +95,61 @@ class BuildScript:
         else:
             return system
     
-    def run_command(self, cmd, cwd=None, shell=True):
+    def _check_windows_shell(self):
+        """Check if running in Git Bash on Windows"""
+        if self.os_name != 'windows':
+            return  # Not Windows, no check needed
+        
+        # Check for MSYSTEM environment variable (set by Git Bash/MSYS2)
+        msystem = os.environ.get('MSYSTEM')
+        if msystem:
+            print(f"{Colors.GREEN}✓{Colors.END} Running in Git Bash/MSYS2 (MSYSTEM={msystem})")
+            return
+        
+        # If we get here, we're not in Git Bash
+        print(f"{Colors.RED}✗ Error: This script must be run in Git Bash on Windows{Colors.END}")
+        print(f"{Colors.YELLOW}Please:{Colors.END}")
+        print(f"  1. Install {Colors.CYAN}Git for Windows{Colors.END} from: https://git-scm.com/download/win")
+        print(f"  2. Right-click in your project folder and select {Colors.CYAN}'Git Bash Here'{Colors.END}")
+        print("  3. Run this script from the Git Bash terminal")
+        print(f"\n{Colors.CYAN}Note:{Colors.END} If you're using WSL, run this script from within WSL instead.")
+        sys.exit(1)
+
+    def run_command(self, cmd, cwd=None, shell=True, capture_output=False):
         """Run a shell command and handle errors"""
         print(f"{Colors.BLUE}Running:{Colors.END} {cmd}")
         if cwd:
             print(f"  {Colors.CYAN}in directory:{Colors.END} {cwd}")
         
         try:
-            result = subprocess.run(
-                cmd, 
-                shell=shell, 
-                cwd=cwd, 
-                check=True, 
-                capture_output=True, 
-                text=True
-            )
-            if result.stdout:
-                print(result.stdout)
-            return result
+            if capture_output:
+                # For commands where we need to capture output (like version checks)
+                result = subprocess.run(
+                    cmd, 
+                    shell=shell, 
+                    cwd=cwd, 
+                    check=True, 
+                    capture_output=True, 
+                    text=True
+                )
+                if result.stdout:
+                    print(result.stdout)
+                return result
+            else:
+                # For build commands, show live output
+                result = subprocess.run(
+                    cmd, 
+                    shell=shell, 
+                    cwd=cwd, 
+                    check=True
+                )
+                return result
         except subprocess.CalledProcessError as e:
             print(f"{Colors.RED}Error running command:{Colors.END} {cmd}")
             print(f"{Colors.RED}Exit code:{Colors.END} {e.returncode}")
-            if e.stdout:
+            if hasattr(e, 'stdout') and e.stdout:
                 print(f"{Colors.YELLOW}Stdout:{Colors.END} {e.stdout}")
-            if e.stderr:
+            if hasattr(e, 'stderr') and e.stderr:
                 print(f"{Colors.RED}Stderr:{Colors.END} {e.stderr}")
             raise
     
@@ -228,7 +261,7 @@ class BuildScript:
                 if self.os_name != 'windows':
                     print(f"{Colors.YELLOW}Converting line endings for Unix compatibility...{Colors.END}")
                     try:
-                        self.run_command(f"dos2unix {build_script_path}")
+                        self.run_command(f"dos2unix {build_script_path}", capture_output=True)
                     except subprocess.CalledProcessError:
                         # Fallback: manual line ending conversion
                         print(f"{Colors.YELLOW}dos2unix failed, trying manual conversion...{Colors.END}")
@@ -239,13 +272,14 @@ class BuildScript:
                             f.write(content)
                 
                 # Make script executable
-                self.run_command(f"chmod +x {build_script_path}")
+                self.run_command(f"chmod +x {build_script_path}", capture_output=True)
                 
-                # Run the build script
-                self.run_command(f"bash build/build-go.sh {self.os_name}/{self.arch}")
+                # Run the build script with bash explicitly
+                self.run_command(f"bash ./build/build-go.sh {self.os_name}/{self.arch}")
             except subprocess.CalledProcessError as e:
                 print(f"{Colors.RED}Go build script failed:{Colors.END} {e}")
-                print(f"{Colors.YELLOW}Continuing without Go build - this may affect cryptography functionality{Colors.END}")
+                sys.exit(1)
+                # print(f"{Colors.YELLOW}Continuing without Go build - this may affect cryptography functionality{Colors.END}")
         else:
             print(f"{Colors.YELLOW}Build script build/build-go.sh not found, skipping go build{Colors.END}")
         
@@ -267,9 +301,13 @@ class BuildScript:
                 shutil.move(str(file), str(self.local_nuget_repo / file.name))
         
         # Add nuget source
-        self.run_command(
-            f'dotnet nuget add source "{self.local_nuget_repo}" --name ProtonRepository'
-        )
+        try:
+            self.run_command(
+                f'dotnet nuget add source "{self.local_nuget_repo}" --name ProtonRepository'
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"{Colors.YELLOW}NuGet source 'ProtonRepository' already exists or error exists (check logs), skipping...{Colors.END}")
+            print(f"{Colors.UNDERLINE}Exception Caught:{Colors.END} {e}")
     
     def build_proton_sdk(self):
         """Build Proton.SDK"""
@@ -305,32 +343,30 @@ class BuildScript:
         print(f"{Colors.BOLD}{Colors.CYAN}=== Building proton-sdk-rs ==={Colors.END}")
         
         rs_dir = self.base_dir / "proton-sdk-rs"
-        native_libs_dir = rs_dir / "native-libs"
-        
-        # Create native-libs directory
-        native_libs_dir.mkdir(parents=True, exist_ok=True)
         
         # Find and copy .NET binaries
         sdk_src_dir = self.base_dir / "Proton.SDK" / "src"
         
-        # Look for published binaries
-        publish_dirs = list(sdk_src_dir.glob("**/bin/Release/net*/publish"))
-        if not publish_dirs:
-            # Fallback to any Release binaries
-            publish_dirs = list(sdk_src_dir.glob("**/bin/Release/net*"))
+        # Look for the net9.0 directory in published binaries
+        net90_dirs = list(sdk_src_dir.glob("**/bin/Release/net9.0"))
+        if not net90_dirs:
+            # Fallback to any net*.0 directory
+            net90_dirs = list(sdk_src_dir.glob("**/bin/Release/net*.0"))
         
-        if publish_dirs:
-            source_dir = publish_dirs[0]  # Take the first match
-            print(f"{Colors.BLUE}Copying binaries from:{Colors.END} {source_dir}")
+        if net90_dirs:
+            source_net90_dir = net90_dirs[0]  # Take the first match
+            print(f"{Colors.BLUE}Copying .NET binaries from:{Colors.END} {source_net90_dir}")
             
-            for file in source_dir.rglob("*"):
-                if file.is_file():
-                    relative_path = file.relative_to(source_dir)
-                    dest_path = native_libs_dir / relative_path
-                    dest_path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(file, dest_path)
+            # Remove existing native-libs if it exists in proton-sdk-sys
+            native_libs_dir = rs_dir / "proton-sdk-sys" / "native-libs"
+            if native_libs_dir.exists():
+                shutil.rmtree(native_libs_dir)
+            
+            # Copy the entire net9.0 directory to proton-sdk-sys/native-libs
+            shutil.copytree(source_net90_dir, native_libs_dir)
+            print(f"{Colors.GREEN}Successfully copied net9.0 directory to proton-sdk-sys/native-libs{Colors.END}")
         else:
-            print(f"{Colors.YELLOW}Warning: No published binaries found{Colors.END}")
+            print(f"{Colors.YELLOW}Warning: No net9.0 binaries found{Colors.END}")
         
         # Run cargo test
         os.chdir(rs_dir)
@@ -342,6 +378,7 @@ class BuildScript:
             print(f"{Colors.BOLD}{Colors.MAGENTA}Starting build process in:{Colors.END} {self.base_dir}")
             print(f"{Colors.BOLD}{Colors.MAGENTA}Target OS/Arch:{Colors.END} {self.os_name}/{self.arch}")
             
+            self._check_windows_shell()
             self.check_dependencies()
             self.clone_repositories()
             self.build_dotnet_crypto()
@@ -370,7 +407,7 @@ def main():
     parser.add_argument(
         "--arch", 
         help="Target architecture (default: auto-detect)",
-        choices=["x64", "arm64", "x86"]
+        choices=["amd64", "arm64", "386"]
     )
     parser.add_argument(
         "--skip-clone", 
