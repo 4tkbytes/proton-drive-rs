@@ -1,0 +1,121 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            shell: bash
+          - os: windows-latest
+            target: win-x64
+            shell: msys2 {0}
+          - os: macos-latest
+            target: osx-x64
+            shell: bash
+
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup MSYS2 (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          git
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-go
+          mingw-w64-x86_64-python
+          mingw-w64-x86_64-python-pip
+
+    - name: Install .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.x'
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install Go (Linux/macOS)
+      if: matrix.os != 'windows-latest'
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Install Python (Linux/macOS)
+      if: matrix.os != 'windows-latest'
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Cache Cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache NuGet packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+
+    - name: Run build script
+      run: python3 build.py
+      working-directory: ${{ github.workspace }}
+
+    - name: Run Rust tests
+      run: cargo test --verbose
+
+    - name: Upload native libraries
+      uses: actions/upload-artifact@v3
+      with:
+        name: native-libs-${{ matrix.target }}
+        path: proton-sdk-sys/native-libs/
+        retention-days: 7
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: artifacts/
+
+    - name: Create release archive
+      run: |
+        mkdir -p release/native-libs
+        cp -r artifacts/*/native-libs/* release/native-libs/ || true
+        cd release
+        tar -czf ../proton-sdk-native-libs.tar.gz native-libs/
+
+    - name: Upload release artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: proton-sdk-native-libs-all-platforms
+        path: proton-sdk-native-libs.tar.gz
+        retention-days: 30

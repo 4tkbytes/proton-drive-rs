@@ -292,6 +292,63 @@ class BuildScript:
             f'src/dotnet/Proton.Cryptography.csproj --output {local_nuget_temp}'
         )
         
+        # Copy the native library to the correct location within the NuGet package
+        crypto_bin_dir = crypto_dir / "bin"
+        if crypto_bin_dir.exists():
+            # Find the native library file
+            native_libs = list(crypto_bin_dir.glob("**/native/libproton_crypto.*"))
+            if native_libs:
+                print(f"{Colors.BLUE}Found native libraries:{Colors.END}")
+                for lib in native_libs:
+                    print(f"  {lib}")
+                
+                # Extract and modify the NuGet package to include native libraries
+                import zipfile
+                import tempfile
+                
+                nupkg_files = list(local_nuget_temp.glob("*.nupkg"))
+                if nupkg_files:
+                    nupkg_file = nupkg_files[0]
+                    print(f"{Colors.BLUE}Adding native libraries to NuGet package: {nupkg_file.name}{Colors.END}")
+                    
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        temp_path = Path(temp_dir)
+                        
+                        # Extract the package
+                        with zipfile.ZipFile(nupkg_file, 'r') as zip_ref:
+                            zip_ref.extractall(temp_path)
+                        
+                        # Copy native libraries to the package
+                        for lib in native_libs:
+                            # Determine the runtime path from the library path
+                            parts = lib.parts
+                            runtime_idx = None
+                            for i, part in enumerate(parts):
+                                if part == "runtimes":
+                                    runtime_idx = i
+                                    break
+                            
+                            if runtime_idx is not None and runtime_idx + 2 < len(parts):
+                                runtime_id = parts[runtime_idx + 1]  # e.g., "linux-x64"
+                                target_dir = temp_path / "runtimes" / runtime_id / "native"
+                                target_dir.mkdir(parents=True, exist_ok=True)
+                                
+                                target_file = target_dir / lib.name
+                                shutil.copy2(lib, target_file)
+                                print(f"  Copied {lib.name} to {target_file}")
+                        
+                        # Repackage
+                        nupkg_file.unlink()  # Remove original
+                        with zipfile.ZipFile(nupkg_file, 'w', zipfile.ZIP_DEFLATED) as zip_ref:
+                            for file_path in temp_path.rglob('*'):
+                                if file_path.is_file():
+                                    arc_name = file_path.relative_to(temp_path)
+                                    zip_ref.write(file_path, arc_name)
+                        
+                        print(f"{Colors.GREEN}Updated NuGet package with native libraries{Colors.END}")
+            else:
+                print(f"{Colors.YELLOW}Warning: No native libraries found in {crypto_bin_dir}{Colors.END}")
+        
         # Ensure local nuget repository exists
         self.local_nuget_repo.mkdir(parents=True, exist_ok=True)
         
@@ -332,11 +389,79 @@ class BuildScript:
                 os.chdir(src_dir)
         
         # Publish Proton.Sdk.Drive
-        drive_project = src_dir / "Proton.Sdk.Drive" / "Proton.Sdk.Drive.csproj"
+        drive_project = src_dir / "Proton.Sdk.Drive.CExports" / "Proton.Sdk.Drive.CExports.csproj"
         if drive_project.exists():
-            self.run_command(f'dotnet publish "{drive_project}"')
+            # Determine the runtime identifier based on the current platform
+            # Use .NET runtime identifier format (x64 instead of amd64)
+            dotnet_arch = 'x64' if self.arch == 'amd64' else self.arch
+            if self.os_name == 'windows':
+                runtime_id = f"win-{dotnet_arch}"
+                lib_suffix = ".dll"
+            elif self.os_name == 'linux':
+                runtime_id = f"linux-{dotnet_arch}"
+                lib_suffix = ".so"
+            elif self.os_name == 'macos':
+                runtime_id = f"osx-{dotnet_arch}"
+                lib_suffix = ".dylib"
+            else:
+                runtime_id = f"{self.os_name}-{dotnet_arch}"
+                lib_suffix = ".so"  # fallback
+            
+            print(f"{Colors.BLUE}Publishing with AOT for runtime: {runtime_id}{Colors.END}")
+            
+            # Special handling for Windows - skip AOT if crypto library is incompatible
+            if self.os_name == 'windows':
+                print(f"{Colors.YELLOW}Warning: Windows AOT build may fail due to toolchain incompatibility{Colors.END}")
+                print(f"{Colors.YELLOW}Attempting build without AOT first...{Colors.END}")
+                
+                try:
+                    # Try without AOT first
+                    self.run_command(
+                        f'dotnet publish "{drive_project}" '
+                        f'-r {runtime_id} '
+                        f'--self-contained '
+                        f'-p:PublishAot=false'
+                    )
+                    print(f"{Colors.GREEN}Non-AOT compilation completed for {runtime_id}{Colors.END}")
+                except subprocess.CalledProcessError:
+                    print(f"{Colors.YELLOW}Non-AOT build also failed, trying regular build...{Colors.END}")
+                    try:
+                        # Fallback to regular build
+                        self.run_command(
+                            f'dotnet build "{drive_project}" -c Release'
+                        )
+                        print(f"{Colors.GREEN}Regular build completed for {runtime_id}{Colors.END}")
+                    except subprocess.CalledProcessError as e:
+                        print(f"{Colors.RED}All Windows build attempts failed:{Colors.END} {e}")
+                        print(f"{Colors.YELLOW}Continuing with build - you may need to build manually{Colors.END}")
+            else:
+                # For non-Windows, try AOT compilation
+                try:
+                    self.run_command(
+                        f'dotnet publish "{drive_project}" '
+                        f'-r {runtime_id} '
+                        f'--self-contained '
+                        f'-p:PublishAot=true '
+                        f'-p:EnableCompressionInSingleFile=false '
+                        f'-p:OptimizationPreference=Speed'
+                    )
+                    print(f"{Colors.GREEN}AOT compilation completed for {runtime_id}{Colors.END}")
+                except subprocess.CalledProcessError:
+                    print(f"{Colors.YELLOW}AOT build failed, trying without AOT...{Colors.END}")
+                    try:
+                        # Fallback to non-AOT
+                        self.run_command(
+                            f'dotnet publish "{drive_project}" '
+                            f'-r {runtime_id} '
+                            f'--self-contained '
+                            f'-p:PublishAot=false'
+                        )
+                        print(f"{Colors.GREEN}Non-AOT compilation completed for {runtime_id}{Colors.END}")
+                    except subprocess.CalledProcessError as e:
+                        print(f"{Colors.RED}Both AOT and non-AOT builds failed:{Colors.END} {e}")
+                        raise
         else:
-            print(f"{Colors.YELLOW}Warning: Proton.Sdk.Drive.csproj not found{Colors.END}")
+            print(f"{Colors.YELLOW}Warning: Proton.Sdk.Drive.CExports.csproj not found{Colors.END}")
     
     def build_proton_sdk_rs(self):
         """Build proton-sdk-rs"""
@@ -344,29 +469,61 @@ class BuildScript:
         
         rs_dir = self.base_dir / "proton-sdk-rs"
         
-        # Find and copy .NET binaries
+        # Find and copy .NET binaries from the AOT-compiled CExports project
         sdk_src_dir = self.base_dir / "Proton.SDK" / "src"
         
-        # Look for the net9.0 directory in published binaries
-        net90_dirs = list(sdk_src_dir.glob("**/bin/Release/net9.0"))
-        if not net90_dirs:
-            # Fallback to any net*.0 directory
-            net90_dirs = list(sdk_src_dir.glob("**/bin/Release/net*.0"))
-        
-        if net90_dirs:
-            source_net90_dir = net90_dirs[0]  # Take the first match
-            print(f"{Colors.BLUE}Copying .NET binaries from:{Colors.END} {source_net90_dir}")
-            
-            # Remove existing native-libs if it exists in proton-sdk-sys
-            native_libs_dir = rs_dir / "proton-sdk-sys" / "native-libs"
-            if native_libs_dir.exists():
-                shutil.rmtree(native_libs_dir)
-            
-            # Copy the entire net9.0 directory to proton-sdk-sys/native-libs
-            shutil.copytree(source_net90_dir, native_libs_dir)
-            print(f"{Colors.GREEN}Successfully copied net9.0 directory to proton-sdk-sys/native-libs{Colors.END}")
+        # Determine the runtime identifier based on the current platform
+        dotnet_arch = 'x64' if self.arch == 'amd64' else self.arch
+        if self.os_name == 'windows':
+            runtime_id = f"win-{dotnet_arch}"
+        elif self.os_name == 'linux':
+            runtime_id = f"linux-{dotnet_arch}"
+        elif self.os_name == 'macos':
+            runtime_id = f"osx-{dotnet_arch}"
         else:
-            print(f"{Colors.YELLOW}Warning: No net9.0 binaries found{Colors.END}")
+            runtime_id = f"{self.os_name}-{dotnet_arch}"
+        
+        # Look for the specific AOT-compiled output directory
+        aot_output_dir = sdk_src_dir / "Proton.Sdk.Drive.CExports" / "bin" / "Release" / "net9.0" / runtime_id
+        
+        if aot_output_dir.exists():
+            print(f"{Colors.BLUE}Copying AOT-compiled binaries from:{Colors.END} {aot_output_dir}")
+            
+            # Create native-libs directory if it doesn't exist
+            native_libs_dir = rs_dir / "proton-sdk-sys" / "native-libs"
+            native_libs_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Copy the runtime folder into native-libs (don't replace, just add/update this runtime)
+            runtime_target_dir = native_libs_dir / runtime_id
+            if runtime_target_dir.exists():
+                shutil.rmtree(runtime_target_dir)  # Remove only this specific runtime folder
+            shutil.copytree(aot_output_dir, runtime_target_dir)
+            print(f"{Colors.GREEN}Successfully copied {runtime_id} AOT binaries to proton-sdk-sys/native-libs/{runtime_id}{Colors.END}")
+        else:
+            print(f"{Colors.YELLOW}Warning: AOT output directory not found at {aot_output_dir}{Colors.END}")
+            
+            # Fallback: Look for any net9.0 directory as before
+            net90_dirs = list(sdk_src_dir.glob("**/bin/Release/net9.0"))
+            if not net90_dirs:
+                # Fallback to any net*.0 directory
+                net90_dirs = list(sdk_src_dir.glob("**/bin/Release/net*.0"))
+            
+            if net90_dirs:
+                source_net90_dir = net90_dirs[0]  # Take the first match
+                print(f"{Colors.BLUE}Copying .NET binaries from fallback location:{Colors.END} {source_net90_dir}")
+                
+                # Create native-libs directory if it doesn't exist
+                native_libs_dir = rs_dir / "proton-sdk-sys" / "native-libs"
+                native_libs_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Copy as a runtime-specific subdirectory
+                runtime_target_dir = native_libs_dir / runtime_id
+                if runtime_target_dir.exists():
+                    shutil.rmtree(runtime_target_dir)  # Remove only this specific runtime folder
+                shutil.copytree(source_net90_dir, runtime_target_dir)
+                print(f"{Colors.GREEN}Successfully copied net9.0 directory to proton-sdk-sys/native-libs/{runtime_id}{Colors.END}")
+            else:
+                print(f"{Colors.YELLOW}Warning: No net9.0 binaries found{Colors.END}")
         
         # Run cargo test
         os.chdir(rs_dir)

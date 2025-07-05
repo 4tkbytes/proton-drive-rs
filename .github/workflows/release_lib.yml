@@ -1,0 +1,162 @@
+name: Beta Release - Native Libraries
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-release:
+    name: Build and Release Native Libraries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            runtime_id: win-x64
+          - os: ubuntu-latest
+            runtime_id: linux-x64
+          - os: macos-latest
+            runtime_id: osx-x64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake pkg-config
+
+      - name: Install system dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install cmake pkg-config
+
+      - name: Setup Git Bash (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          echo "MSYSTEM=MINGW64" >> $GITHUB_ENV
+
+      - name: Run build script
+        shell: bash
+        run: |
+          python3 build.py
+        env:
+          PROTON_SDK_FORCE_BUILD: "1"
+
+      - name: Extract native libraries from publish folder
+        shell: bash
+        run: |
+          publish_dir="proton-sdk-sys/native-libs/${{ matrix.runtime_id }}/publish"
+          
+          if [ -d "$publish_dir" ]; then
+            echo "Found publish directory: $publish_dir"
+            mkdir -p release-libs
+            cp -r "$publish_dir"/* release-libs/
+            
+            echo "Contents of release libraries:"
+            ls -la release-libs/
+          else
+            echo "Error: Publish directory not found at $publish_dir"
+            echo "Available structure:"
+            find proton-sdk-sys/native-libs/ -type d 2>/dev/null || echo "native-libs not found"
+            exit 1
+          fi
+
+      - name: Create platform archive
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a "proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.zip" ./release-libs/*
+            echo "ARCHIVE_NAME=proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.zip" >> $GITHUB_ENV
+          else
+            tar -czf "proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.tar.gz" -C release-libs .
+            echo "ARCHIVE_NAME=proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.tar.gz" >> $GITHUB_ENV
+          fi
+
+      - name: Upload archive as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.runtime_id }}-native-libs
+          path: ${{ env.ARCHIVE_NAME }}
+
+  create-beta-release:
+    name: Create Beta Release
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release-files
+          
+          # Move all archives to release-files directory
+          find artifacts/ -name "*.zip" -o -name "*.tar.gz" | while read file; do
+            cp "$file" release-files/
+          done
+          
+          echo "Files to be released:"
+          ls -la release-files/
+
+      - name: Create beta release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: beta-${{ github.sha }}
+          name: "Beta Release - Native Libraries (commit: ${{ github.sha }})"
+          body: |
+            ## Beta Release - Native Libraries
+            
+            **Commit**: `${{ github.sha }}`
+            **Branch**: `${{ github.ref_name }}`
+            **Built**: ${{ github.run_number }}
+            
+            This is an automated beta release containing native libraries built from the latest commit.
+            
+            ### Available Platforms:
+            - **Windows x64**: `proton-sdk-win-x64-${{ github.sha }}.zip`
+            - **Linux x64**: `proton-sdk-linux-x64-${{ github.sha }}.tar.gz`
+            - **macOS x64**: `proton-sdk-osx-x64-${{ github.sha }}.tar.gz`
+            
+            ### Usage:
+            1. Download the appropriate archive for your platform
+            2. Extract to your project's native libraries directory
+            3. Libraries are ready to use with Proton SDK Rust bindings
+            
+            > **Note**: This is a beta release for testing purposes. For stable releases, use tagged versions.
+          files: release-files/*
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
