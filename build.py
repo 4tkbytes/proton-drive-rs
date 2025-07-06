@@ -268,134 +268,34 @@ class BuildScript:
             "GOARCH": go_arch,
         })
         
-        # Windows-specific configuration
+        # Windows-specific configuration - default to MinGW
         if go_os == "windows":
-            # Check for different compiler options in order of preference
-            compiler_configs = [
-                # Option 1: Try MSVC directly (if vcvars is set up)
-                {
-                    "name": "MSVC",
-                    "cc": "cl",
-                    "cxx": "cl",
-                    "check_cmd": ["cl"],
-                    "cgo_cflags": "",
-                    "cgo_ldflags": "-s -w"
-                },
-                # Option 2: Try clang-cl (MSVC-compatible clang)
-                {
-                    "name": "clang-cl",
-                    "cc": "clang-cl",
-                    "cxx": "clang-cl",
-                    "check_cmd": ["clang-cl", "--version"],
-                    "cgo_cflags": "",
-                    "cgo_ldflags": "-s -w"
-                },
-                # Option 3: MinGW GCC (most reliable fallback)
-                {
-                    "name": "MinGW GCC",
-                    "cc": "gcc",
-                    "cxx": "g++",
-                    "check_cmd": ["gcc", "--version"],
-                    "cgo_cflags": "-O2",
-                    "cgo_ldflags": "-s -w -static -static-libgcc -static-libstdc++"
-                }
-            ]
-            
-            selected_compiler = None
-            for config in compiler_configs:
-                try:
-                    result = subprocess.run(
-                        config["check_cmd"], 
-                        capture_output=True, 
-                        check=True, 
-                        timeout=10
-                    )
-                    selected_compiler = config
-                    print(f"{Colors.GREEN}Using {config['name']} for Windows compilation{Colors.END}")
-                    break
-                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-                    print(f"{Colors.YELLOW}{config['name']} not available{Colors.END}")
-                    continue
-            
-            if not selected_compiler:
-                print(f"{Colors.RED}No suitable C compiler found for Windows{Colors.END}")
-                print(f"{Colors.YELLOW}Please install one of: Visual Studio Build Tools, LLVM/Clang, or MinGW-w64{Colors.END}")
+            # Check if MinGW GCC is available
+            try:
+                subprocess.run(
+                    ["gcc", "--version"], 
+                    capture_output=True, 
+                    check=True, 
+                    timeout=10
+                )
+                print(f"{Colors.GREEN}Using MinGW GCC for Windows compilation (most compatible){Colors.END}")
+                
+                # Configure for MinGW
+                go_env.update({
+                    "CC": "gcc",
+                    "CXX": "g++",
+                    "CGO_CFLAGS": "-O2",
+                    "CGO_LDFLAGS": "-s -w -static -static-libgcc -static-libstdc++"
+                })
+                
+            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                print(f"{Colors.RED}MinGW GCC not found{Colors.END}")
+                print(f"{Colors.YELLOW}Please install MinGW-w64 from: https://www.mingw-w64.org/downloads/{Colors.END}")
+                print(f"{Colors.YELLOW}Or use chocolatey: choco install mingw{Colors.END}")
                 return
-            
-            # Apply the selected compiler configuration - ensure all values are strings
-            go_env.update({
-                "CC": str(selected_compiler["cc"]),
-                "CXX": str(selected_compiler["cxx"]),
-                "CGO_CFLAGS": str(selected_compiler["cgo_cflags"]),
-                "CGO_LDFLAGS": str(selected_compiler["cgo_ldflags"])
-            })
-            
-            # For MSVC/clang-cl, ensure proper environment is set up
-            if selected_compiler["name"] in ["MSVC", "clang-cl"]:
-                # Try to detect Visual Studio installation and set up environment
-                try:
-                    # Try to find vcvars64.bat and run it to set up MSVC environment
-                    import winreg
-                    
-                    # Look for Visual Studio installation
-                    vs_keys = [
-                        r"SOFTWARE\Microsoft\VisualStudio\SxS\VS7",
-                        r"SOFTWARE\WOW6432Node\Microsoft\VisualStudio\SxS\VS7"
-                    ]
-                    
-                    vs_path = None
-                    for key_path in vs_keys:
-                        try:
-                            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
-                                # Try different Visual Studio versions
-                                for version in ["17.0", "16.0", "15.0"]:  # 2022, 2019, 2017
-                                    try:
-                                        vs_path, _ = winreg.QueryValueEx(key, version)
-                                        if Path(vs_path).exists():
-                                            break
-                                    except FileNotFoundError:
-                                        continue
-                            if vs_path:
-                                break
-                        except FileNotFoundError:
-                            continue
-                    
-                    if vs_path:
-                        vcvars_path = Path(vs_path) / "VC" / "Auxiliary" / "Build" / "vcvars64.bat"
-                        if vcvars_path.exists():
-                            print(f"{Colors.BLUE}Found Visual Studio at: {vs_path}{Colors.END}")
-                            
-                            # Run vcvars64.bat to get environment variables
-                            cmd = f'"{vcvars_path}" && set'
-                            result = subprocess.run(
-                                cmd, 
-                                shell=True, 
-                                capture_output=True, 
-                                text=True, 
-                                timeout=30
-                            )
-                            
-                            if result.returncode == 0:
-                                # Parse environment variables from vcvars output
-                                for line in result.stdout.splitlines():
-                                    if '=' in line:
-                                        key, value = line.split('=', 1)
-                                        if key.upper() in ['INCLUDE', 'LIB', 'LIBPATH', 'PATH', 'WINDOWSSDKDIR', 'WINDOWSSDKVERSION']:
-                                            go_env[key] = value
-                                print(f"{Colors.GREEN}MSVC environment configured{Colors.END}")
-                            else:
-                                print(f"{Colors.YELLOW}Could not configure MSVC environment, trying without{Colors.END}")
-                        else:
-                            print(f"{Colors.YELLOW}vcvars64.bat not found, trying without MSVC setup{Colors.END}")
-                    else:
-                        print(f"{Colors.YELLOW}Visual Studio not found in registry, trying without MSVC setup{Colors.END}")
-                        
-                except Exception as e:
-                    print(f"{Colors.YELLOW}Could not set up MSVC environment: {e}{Colors.END}")
-                    print(f"{Colors.YELLOW}Continuing without MSVC environment setup{Colors.END}")
         else:
             go_env["CC"] = "gcc"
-        
+    
         lib_name = "proton_crypto"
         output_dir_path = crypto_dir / "bin" / "runtimes" / runtime_id / "native"
         output_dir_path.mkdir(parents=True, exist_ok=True)
@@ -411,8 +311,8 @@ class BuildScript:
                 if build_mode == "c-shared":
                     output_file_name = f"{lib_name}.dll"
                 else:
-                    # Generate both .a and .lib for Windows compatibility
-                    output_file_name = f"{lib_name}.a"  # Go generates .a file
+                    # Generate .a file for MinGW compatibility
+                    output_file_name = f"{lib_name}.a"
             elif go_os == "linux":
                 if build_mode == "c-shared":
                     output_file_name = f"lib{lib_name}.so"
@@ -463,30 +363,16 @@ class BuildScript:
                 )
                 print(f"{Colors.GREEN}+ Successfully built {output_file_name}{Colors.END}")
                 
-                # For Windows c-archive mode, create MSVC-compatible .lib file
+                # For Windows c-archive mode, also create a .lib file by copying
+                # This provides compatibility for both MinGW and MSVC linking scenarios
                 if go_os == "windows" and build_mode == "c-archive" and output_file_path.exists():
-                    # Try to convert .a to .lib using lib.exe (MSVC library manager)
                     lib_file_path = output_file_path.with_suffix(".lib")
-                    
-                    # First try using lib.exe if available (part of MSVC)
                     try:
-                        lib_cmd = [
-                            "lib.exe",
-                            f"/OUT:{lib_file_path}",
-                            str(output_file_path)
-                        ]
-                        subprocess.run(lib_cmd, check=True, capture_output=True, text=True)
-                        print(f"{Colors.GREEN}+ Created MSVC-compatible .lib file using lib.exe: {lib_file_path.name}{Colors.END}")
-                    except (subprocess.CalledProcessError, FileNotFoundError):
-                        # Fallback: Just copy and rename the .a file to .lib
-                        # This works in many cases as the formats are similar
-                        try:
-                            shutil.copy2(output_file_path, lib_file_path)
-                            print(f"{Colors.YELLOW}+ Created .lib file by copying .a file: {lib_file_path.name}{Colors.END}")
-                            print(f"{Colors.YELLOW}  Note: This may not be fully MSVC-compatible{Colors.END}")
-                        except Exception as e:
-                            print(f"{Colors.YELLOW}Warning: Could not create .lib file: {e}{Colors.END}")
-                
+                        shutil.copy2(output_file_path, lib_file_path)
+                        print(f"{Colors.GREEN}+ Created .lib file for compatibility: {lib_file_path.name}{Colors.END}")
+                    except Exception as e:
+                        print(f"{Colors.YELLOW}Warning: Could not create .lib file: {e}{Colors.END}")
+            
             except subprocess.CalledProcessError as e:
                 print(f"{Colors.RED}Go build failed for {build_mode}:{Colors.END} {e}")
                 if e.stdout:
@@ -494,44 +380,9 @@ class BuildScript:
                 if e.stderr:
                     print(f"{Colors.RED}Stderr:{Colors.END} {e.stderr}")
                 
-                # For Windows, if clang failed, try fallback to MinGW
-                if go_os == "windows" and "clang" in go_env.get("CC", ""):
-                    print(f"{Colors.YELLOW}Clang build failed, trying MinGW GCC fallback...{Colors.END}")
-                    
-                    # Update environment for MinGW
-                    go_env.update({
-                        "CC": "gcc",
-                        "CXX": "g++", 
-                        "CGO_CFLAGS": "-O2",
-                        "CGO_LDFLAGS": "-s -w -static -static-libgcc -static-libstdc++"
-                    })
-                    
-                    try:
-                        subprocess.run(
-                            cmd,
-                            env=go_env,
-                            cwd=crypto_dir,
-                            check=True,
-                            capture_output=True,
-                            text=True
-                        )
-                        print(f"{Colors.GREEN}+ MinGW fallback successful for {output_file_name}{Colors.END}")
-                        
-                        # Create .lib file for MinGW output too
-                        if build_mode == "c-archive" and output_file_path.exists():
-                            lib_file_path = output_file_path.with_suffix(".lib")
-                            shutil.copy2(output_file_path, lib_file_path)
-                            print(f"{Colors.GREEN}+ Created .lib file from MinGW output: {lib_file_path.name}{Colors.END}")
-                            
-                    except subprocess.CalledProcessError as fallback_e:
-                        print(f"{Colors.RED}MinGW fallback also failed:{Colors.END} {fallback_e}")
-                        if fallback_e.stderr:
-                            print(f"{Colors.RED}Stderr:{Colors.END} {fallback_e.stderr}")
-                        # Don't exit, try other build modes
-                        continue
-                else:
-                    # Don't exit, try other build modes
-                    continue
+                # Skip this build mode and continue
+                print(f"{Colors.YELLOW}Skipping {build_mode} and continuing with next build mode{Colors.END}")
+                continue
     
     def build_dotnet_crypto(self):
         """Build dotnet-crypto package"""
@@ -759,6 +610,32 @@ class BuildScript:
             print(f"{Colors.BLUE}Found AOT output binaries at:{Colors.END} {aot_output_dir}")
             source_dir = aot_output_dir
         
+        def copy_files_excluding_pdb(src_dir, dst_dir):
+            """Copy files from src_dir to dst_dir, excluding .pdb files"""
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            
+            copied_files = []
+            for item in src_dir.rglob('*'):
+                if item.is_file():
+                    # Skip .pdb files
+                    if item.suffix.lower() == '.pdb':
+                        print(f"{Colors.YELLOW}Skipping PDB file: {item.name}{Colors.END}")
+                        continue
+                    
+                    # Calculate relative path from source
+                    rel_path = item.relative_to(src_dir)
+                    dst_file = dst_dir / rel_path
+                    
+                    # Create parent directories if needed
+                    dst_file.parent.mkdir(parents=True, exist_ok=True)
+                    
+                    # Copy the file
+                    shutil.copy2(item, dst_file)
+                    copied_files.append(item.name)
+                    print(f"{Colors.GREEN}Copied: {item.name}{Colors.END}")
+            
+            return copied_files
+        
         if source_dir:
             print(f"{Colors.BLUE}Copying AOT-compiled binaries from:{Colors.END} {source_dir}")
             
@@ -777,13 +654,15 @@ class BuildScript:
             
             # Copy the runtime folder into native-libs with publish subdirectory
             runtime_target_dir = native_libs_dir / runtime_id / "publish"
-            runtime_target_dir.mkdir(parents=True, exist_ok=True)
             
-            # Remove existing contents and copy new ones
+            # Remove existing contents if they exist
             if runtime_target_dir.exists():
                 shutil.rmtree(runtime_target_dir)
-            shutil.copytree(source_dir, runtime_target_dir)
-            print(f"{Colors.GREEN}Successfully copied {runtime_id} AOT binaries to {runtime_target_dir}{Colors.END}")
+            
+            # Copy files excluding .pdb files
+            copied_files = copy_files_excluding_pdb(source_dir, runtime_target_dir)
+            print(f"{Colors.GREEN}Successfully copied {len(copied_files)} files (excluding .pdb) to {runtime_target_dir}{Colors.END}")
+        
         else:
             print(f"{Colors.YELLOW}Warning: AOT output directory not found at {aot_output_dir}{Colors.END}")
             
@@ -814,11 +693,13 @@ class BuildScript:
                 runtime_target_dir = native_libs_dir / runtime_id / "publish"
                 if runtime_target_dir.exists():
                     shutil.rmtree(runtime_target_dir)  # Remove only this specific runtime folder
-                shutil.copytree(source_net90_dir, runtime_target_dir)
-                print(f"{Colors.GREEN}Successfully copied net9.0 directory to {runtime_target_dir}{Colors.END}")
+                
+                # Copy files excluding .pdb files
+                copied_files = copy_files_excluding_pdb(source_net90_dir, runtime_target_dir)
+                print(f"{Colors.GREEN}Successfully copied {len(copied_files)} files (excluding .pdb) to {runtime_target_dir}{Colors.END}")
             else:
                 print(f"{Colors.YELLOW}Warning: No net9.0 binaries found{Colors.END}")
-        
+    
         # Run cargo test for both proton-sdk-rs and proton-sdk-sys
         rust_projects = [
             ("proton-sdk-rs", "Rust workspace"),
