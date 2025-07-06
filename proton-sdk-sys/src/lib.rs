@@ -1,153 +1,110 @@
-use std::path::{Path, PathBuf};
-use std::fs;
-use std::env;
+#[cfg(test)]
+pub mod tests;
+pub mod client;
 
-#[allow(dead_code)]
-fn get_runtime_id() -> String {
-    let os = if cfg!(target_os = "windows") {
-        "win"
-    } else if cfg!(target_os = "linux") {
-        "linux"
-    } else if cfg!(target_os = "macos") {
-        "osx"
-    } else {
-        "unknown"
-    };
-    
-    let arch = if cfg!(target_arch = "x86_64") {
-        "x64"
-    } else if cfg!(target_arch = "aarch64") {
-        "arm64"
-    } else if cfg!(target_arch = "x86") {
-        "x86"
-    } else {
-        "unknown"
-    };
-    
-    format!("{}-{}", os, arch)
+use libloading::Library;
+use std::path::PathBuf;
+
+#[repr(C)]
+struct ByteArray {
+    pointer: *const u8,
+    length: usize,
 }
 
-#[allow(dead_code)]
-fn find_workspace_root() -> Option<PathBuf> {
-    let mut current = env::current_dir().ok()?;
+/// This library calls the proton sdk library and returns a Library using libloader.
+/// It searches through potential locations for the library, primarily in the native-libs directory
+pub unsafe fn call_sdk_lib() -> Result<Library, libloading::Error> {
+    let library_path = get_library_path();
     
-    loop {
-        if current.join("Cargo.toml").exists() && 
-           current.join("proton-sdk-sys").exists() {
-            return Some(current);
-        }
-        
-        if let Some(parent) = current.parent() {
-            current = parent.to_path_buf();
-        } else {
-            break;
+    match Library::new(&library_path) {
+        Ok(lib) => Ok(lib),
+        Err(e) => {
+            eprintln!("Failed to load library from {}: {}", library_path.display(), e);
+            
+            // Try fallback locations
+            for fallback_path in get_fallback_paths() {
+                if let Ok(lib) = Library::new(&fallback_path) {
+                    return Ok(lib);
+                }
+            }
+            
+            Err(e)
         }
     }
-    
-    None
 }
 
-#[allow(dead_code)]
-fn call_dyn() -> Result<(), Box<dyn std::error::Error>> {
-    let runtime_id = get_runtime_id();
-    
-    let workspace_root = find_workspace_root()
-        .ok_or("Could not find workspace root")?;
-    
-    let native_libs_dir = workspace_root
-        .join("proton-sdk-sys")
-        .join("native-libs")
-        .join(&runtime_id);
-    
-    if !native_libs_dir.exists() {
-        return Err(format!("Native libraries directory not found: {:?}", native_libs_dir).into());
+fn get_library_path() -> PathBuf {
+    let (runtime_id, lib_name) = get_platform_info();
+    PathBuf::from(format!("native-libs/{}/publish/{}", runtime_id, lib_name))
+}
+
+fn get_platform_info() -> (&'static str, &'static str) {
+    #[cfg(target_os = "windows")]
+    {
+        let runtime_id = match std::env::consts::ARCH {
+            "x86_64" => "win-x64",
+            "x86" => "win-x86",
+            "aarch64" => "win-arm64",
+            _ => panic!("Unsupported Windows architecture: {}", std::env::consts::ARCH),
+        };
+        (runtime_id, "proton_drive_sdk.dll")
     }
     
-    let library_names = if cfg!(target_os = "windows") {
-        vec![
-            "Proton.Sdk.dll",
-            "Proton.Sdk.Drive.dll", 
-            "proton_sdk.dll",
-            "libproton_drive_sdk.dll",
-        ]
-    } else if cfg!(target_os = "macos") {
-        vec![
-            "libProton.Sdk.dylib",
-            "libProton.Sdk.Drive.dylib",
-            "libproton_sdk.dylib",
-            "libproton_drive_sdk.dylib",
-        ]
-    } else {
-        vec![
-            "libProton.Sdk.so",
-            "libProton.Sdk.Drive.so", 
-            "libproton_sdk.so",
-            "libproton_drive_sdk.so",
-        ]
-    };
-    
-    let mut attempted_paths = Vec::new();
-    let mut load_errors = Vec::new();
-    
-    fn find_libraries_recursive(dir: &Path, names: &[&str]) -> Vec<PathBuf> {
-        let mut found = Vec::new();
-        
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    found.extend(find_libraries_recursive(&path, names));
-                } else if let Some(file_name) = path.file_name() {
-                    let file_str = file_name.to_string_lossy().to_lowercase();
-                    for &name in names {
-                        if file_str == name.to_lowercase() {
-                            found.push(path.clone());
-                        }
-                    }
-                }
-            }
-        }
-        
-        found
+    #[cfg(target_os = "linux")]
+    {
+        let runtime_id = match std::env::consts::ARCH {
+            "x86_64" => "linux-x64",
+            "x86" => "linux-x86",
+            "aarch64" => "linux-arm64",
+            "arm" => "linux-arm",
+            _ => panic!("Unsupported Linux architecture: {}", std::env::consts::ARCH),
+        };
+        (runtime_id, "libproton_drive_sdk.so")
     }
     
-    let found_libraries = find_libraries_recursive(&native_libs_dir, &library_names);
-    
-    if found_libraries.is_empty() {
-        return Err(format!(
-            "No suitable libraries found in {:?}. Looking for: {:?}", 
-            native_libs_dir, 
-            library_names
-        ).into());
+    #[cfg(target_os = "macos")]
+    {
+        let runtime_id = match std::env::consts::ARCH {
+            "x86_64" => "osx-x64",
+            "aarch64" => "osx-arm64",
+            _ => panic!("Unsupported macOS architecture: {}", std::env::consts::ARCH),
+        };
+        (runtime_id, "libproton_drive_sdk.dylib")
     }
     
-    println!("Found {} potential libraries:", found_libraries.len());
-    for lib_path in &found_libraries {
-        println!("  - {:?}", lib_path);
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        panic!("Unsupported operating system: {}", std::env::consts::OS);
+    }
+}
+
+fn get_fallback_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let (runtime_id, lib_name) = get_platform_info();
+    
+    paths.push(PathBuf::from(format!("native-libs/{}/{}", runtime_id, lib_name)));
+    
+    paths.push(PathBuf::from(lib_name));
+    
+    paths.push(PathBuf::from(format!("libs/{}", lib_name)));
+    
+    #[cfg(target_os = "linux")]
+    {
+        paths.push(PathBuf::from(format!("/usr/local/lib/{}", lib_name)));
+        paths.push(PathBuf::from(format!("/usr/lib/{}", lib_name)));
     }
     
-    // attepmting to load each library
-    for lib_path in &found_libraries {
-        attempted_paths.push(lib_path.clone());
-        
-        unsafe {
-            match libloading::Library::new(lib_path) {
-                Ok(_lib) => {
-                    println!("✓ Successfully loaded library: {:?}", lib_path);
-                    return Ok(());
-                }
-                Err(e) => {
-                    let error_msg = format!("Failed to load {:?}: {}", lib_path, e);
-                    println!("✗ {}", error_msg);
-                    load_errors.push(error_msg);
-                }
-            }
-        }
+    #[cfg(target_os = "macos")]
+    {
+        paths.push(PathBuf::from(format!("/usr/local/lib/{}", lib_name)));
+        paths.push(PathBuf::from(format!("/opt/homebrew/lib/{}", lib_name)));
     }
     
-    Err(format!(
-        "Failed to load any library. Attempted paths: {:?}\nErrors: {:?}", 
-        attempted_paths, 
-        load_errors
-    ).into())
+    paths
+}
+
+pub unsafe fn call_sdk_lib_unwrap() -> Library {
+    call_sdk_lib().unwrap_or_else(|e| {
+        panic!("Failed to load proton drive SDK library: {}", e);
+    })
 }

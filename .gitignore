@@ -1,2 +1,4 @@
 /target
 proton-sdk-sys/native-libs
+Proton.SDK
+dotnet-crypto
