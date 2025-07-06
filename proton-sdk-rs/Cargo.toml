@@ -12,4 +12,5 @@ readme = "../README.md"
 drive = []
 
 [dependencies]
-# proton-sdk-sys = { path = "../proton-sdk-sys" }
+proton-sdk-sys ={ path = "../proton-sdk-sys"}
+anyhow = "1.0.98"

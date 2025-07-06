@@ -35,15 +35,28 @@ pub fn test_cancellation_token() -> anyhow::Result<()> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cancellation_token_creation() {
-        match test_cancellation_token() {
-            Ok(()) => println!("Test passed!"),
-            Err(e) => panic!("Test failed: {}", e),
-        }
+#[test]
+fn test_cancellation_token_creation() {
+    match test_cancellation_token() {
+        Ok(()) => println!("Test passed!"),
+        Err(e) => panic!("Test failed: {}", e),
     }
+}
+
+#[test]
+fn test_protobuf_generation() {
+    // This test will fail to compile if protobuf generation didn't work
+    // Try to create a message from your proto files
+    
+    // Example for account.proto messages
+    let _options = ProtonClientOptions {
+        app_version: "test".to_string(),
+        user_agent: None,
+        base_url: None,
+        disable_tls_pinning: None,
+        ignore_ssl_certificate_errors: None,
+        logger_provider_handle: None,
+    };
+    
+    println!("Protobuf generation working!");
 }

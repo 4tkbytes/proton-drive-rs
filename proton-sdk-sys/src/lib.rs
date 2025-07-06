@@ -1,3 +1,9 @@
+pub mod nodes;
+pub mod sessions;
+include!(concat!(env!("OUT_DIR"), "/_.rs"));
+
+pub mod cancellation;
+pub mod drive;
 /// This module provides the data structures "translated" into rust as shown in proton_sdk.h
 pub mod data;
 #[cfg(test)]
