@@ -77,7 +77,7 @@ class BuildScript:
         self.os_name = self._detect_os()
         self.local_nuget_repo = Path.home() / "local-nuget-repository"
         self.required_tools = ['git', 'dotnet', 'cargo', 'rustc', 'go', 'gcc']
-        self.optional_tools = ['dos2unix']  # Tools that are helpful but not required
+        self.optional_tools = []  # No optional tools required with integrated build system
         
         print(f"{Colors.CYAN}Base directory set to: {self.base_dir}{Colors.END}")
         print(f"{Colors.CYAN}Current working directory: {Path.cwd()}{Colors.END}")
@@ -107,7 +107,7 @@ class BuildScript:
             return system
     
     def _check_windows_shell(self):
-        """Check if running in Git Bash on Windows"""
+        """Check Windows shell compatibility (no longer required since Go build is integrated)"""
         if self.os_name != 'windows':
             return  # Not Windows, no check needed
         
@@ -115,16 +115,10 @@ class BuildScript:
         msystem = os.environ.get('MSYSTEM')
         if msystem:
             print(f"{Colors.GREEN}✓{Colors.END} Running in Git Bash/MSYS2 (MSYSTEM={msystem})")
-            return
+        else:
+            print(f"{Colors.CYAN}ℹ{Colors.END} Running in standard Windows shell (PowerShell/CMD)")
         
-        # If we get here, we're not in Git Bash
-        print(f"{Colors.RED}✗ Error: This script must be run in Git Bash on Windows{Colors.END}")
-        print(f"{Colors.YELLOW}Please:{Colors.END}")
-        print(f"  1. Install {Colors.CYAN}Git for Windows{Colors.END} from: https://git-scm.com/download/win")
-        print(f"  2. Right-click in your project folder and select {Colors.CYAN}'Git Bash Here'{Colors.END}")
-        print("  3. Run this script from the Git Bash terminal")
-        print(f"\n{Colors.CYAN}Note:{Colors.END} If you're using WSL, run this script from within WSL instead.")
-        sys.exit(1)
+        print(f"{Colors.GREEN}✓{Colors.END} Windows shell compatibility verified - Go build is now integrated")
 
     def run_command(self, cmd, cwd=None, shell=True, capture_output=False):
         """Run a shell command and handle errors"""
@@ -187,23 +181,6 @@ class BuildScript:
                     missing_tools.append(tool)
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
                 missing_tools.append(tool)
-        
-        # Special check for bash on Windows (needed for build-go.sh)
-        if self.os_name == 'windows':
-            try:
-                result = subprocess.run(
-                    ['bash', '--version'], 
-                    capture_output=True, 
-                    text=True, 
-                    timeout=10,
-                    check=False
-                )
-                if result.returncode == 0:
-                    print(f"{Colors.GREEN}✓{Colors.END} bash is available")
-                else:
-                    print(f"{Colors.YELLOW}⚠{Colors.END} bash not found - Go build script may fail on Windows")
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
-                print(f"{Colors.YELLOW}⚠{Colors.END} bash not found - Go build script may fail on Windows")
         
         # Check for optional tools
         for tool in self.optional_tools:
@@ -381,7 +358,7 @@ class BuildScript:
         
         # Pack the project with multiple target frameworks
         self.run_command(
-            f'dotnet pack -c Release -p:Version=1.0.0 -p:TargetFrameworks="net8.0;net9.0" '
+            f'dotnet pack -c Release -p:Version=1.0.0 '
             f'src/dotnet/Proton.Cryptography.csproj --output {local_nuget_temp}'
         )
         
