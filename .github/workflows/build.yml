@@ -9,6 +9,7 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         include:
@@ -17,7 +18,7 @@ jobs:
             shell: bash
           - os: windows-latest
             target: win-x64
-            shell: msys2 {0}
+            shell: pwsh
           - os: macos-latest
             target: osx-x64
             shell: bash
@@ -32,19 +33,6 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Setup MSYS2 (Windows)
-      if: matrix.os == 'windows-latest'
-      uses: msys2/setup-msys2@v2
-      with:
-        msystem: MINGW64
-        update: true
-        install: >-
-          git
-          mingw-w64-x86_64-gcc
-          mingw-w64-x86_64-go
-          mingw-w64-x86_64-python
-          mingw-w64-x86_64-python-pip
-
     - name: Install .NET
       uses: actions/setup-dotnet@v4
       with:
@@ -53,14 +41,12 @@ jobs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
 
-    - name: Install Go (Linux/macOS)
-      if: matrix.os != 'windows-latest'
+    - name: Install Go
       uses: actions/setup-go@v4
       with:
         go-version: '1.21'
 
-    - name: Install Python (Linux/macOS)
-      if: matrix.os != 'windows-latest'
+    - name: Install Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.x'
@@ -82,11 +68,19 @@ jobs:
 
     - name: Debug working directory and files
       run: |
-        echo "Current working directory: $(pwd)"
-        echo "Contents of current directory:"
-        ls -la
-        echo "Contents of subdirectories:"
-        find . -maxdepth 2 -type d -name "*" | head -20
+        if ($IsWindows) {
+          Write-Host "Current working directory: $(Get-Location)"
+          Write-Host "Contents of current directory:"
+          Get-ChildItem -Force
+          Write-Host "Contents of subdirectories:"
+          Get-ChildItem -Directory -Recurse -Depth 1 | Select-Object -First 20
+        } else {
+          echo "Current working directory: $(pwd)"
+          echo "Contents of current directory:"
+          ls -la
+          echo "Contents of subdirectories:"
+          find . -maxdepth 2 -type d -name "*" | head -20
+        }
 
     - name: Run build script
       run: python3 build.py

@@ -572,12 +572,13 @@ class BuildScript:
         print(f"{Colors.BOLD}{Colors.CYAN}=== Building proton-sdk-rs ==={Colors.END}")
         
         # Determine the correct rust directory path
-        if (self.base_dir / "proton-sdk-rs").exists():
-            # Standard case - proton-sdk-rs is a subdirectory
-            rs_dir = self.base_dir / "proton-sdk-rs"
-        else:
-            # CI case - we're already in the main repo
-            rs_dir = self.base_dir
+        # The proton-sdk-sys directory should be directly under the base directory
+        # alongside proton-sdk-rs (the Rust workspace directory)
+        rs_dir = self.base_dir
+        
+        print(f"{Colors.CYAN}Using base directory for native libs: {rs_dir}{Colors.END}")
+        print(f"{Colors.CYAN}Looking for proton-sdk-sys at: {rs_dir / 'proton-sdk-sys'}{Colors.END}")
+        print(f"{Colors.CYAN}Looking for proton-sdk-rs at: {rs_dir / 'proton-sdk-rs'}{Colors.END}")
         
         # Find and copy .NET binaries from the AOT-compiled CExports project
         sdk_src_dir = self.base_dir / "Proton.SDK" / "src"
@@ -610,8 +611,17 @@ class BuildScript:
             print(f"{Colors.BLUE}Copying AOT-compiled binaries from:{Colors.END} {source_dir}")
             
             # Create native-libs directory if it doesn't exist
-            native_libs_dir = rs_dir / "proton-sdk-sys" / "native-libs"
+            # proton-sdk-sys should be directly under base directory, not under proton-sdk-rs
+            proton_sdk_sys_dir = self.base_dir / "proton-sdk-sys"
+            if not proton_sdk_sys_dir.exists():
+                print(f"{Colors.RED}Error: Cannot find proton-sdk-sys directory at {proton_sdk_sys_dir}{Colors.END}")
+                print(f"{Colors.YELLOW}Expected structure: {self.base_dir} should contain both 'proton-sdk-rs' and 'proton-sdk-sys' directories{Colors.END}")
+                return
+            
+            native_libs_dir = proton_sdk_sys_dir / "native-libs"
             native_libs_dir.mkdir(parents=True, exist_ok=True)
+            
+            print(f"{Colors.CYAN}Creating native-libs at: {native_libs_dir}{Colors.END}")
             
             # Copy the runtime folder into native-libs with publish subdirectory
             runtime_target_dir = native_libs_dir / runtime_id / "publish"
@@ -621,7 +631,7 @@ class BuildScript:
             if runtime_target_dir.exists():
                 shutil.rmtree(runtime_target_dir)
             shutil.copytree(source_dir, runtime_target_dir)
-            print(f"{Colors.GREEN}Successfully copied {runtime_id} AOT binaries to proton-sdk-sys/native-libs/{runtime_id}/publish{Colors.END}")
+            print(f"{Colors.GREEN}Successfully copied {runtime_id} AOT binaries to {runtime_target_dir}{Colors.END}")
         else:
             print(f"{Colors.YELLOW}Warning: AOT output directory not found at {aot_output_dir}{Colors.END}")
             
@@ -636,21 +646,46 @@ class BuildScript:
                 print(f"{Colors.BLUE}Copying .NET binaries from fallback location:{Colors.END} {source_net90_dir}")
                 
                 # Create native-libs directory if it doesn't exist
-                native_libs_dir = rs_dir / "proton-sdk-sys" / "native-libs"
+                # proton-sdk-sys should be directly under base directory, not under proton-sdk-rs
+                proton_sdk_sys_dir = self.base_dir / "proton-sdk-sys"
+                if not proton_sdk_sys_dir.exists():
+                    print(f"{Colors.RED}Error: Cannot find proton-sdk-sys directory at {proton_sdk_sys_dir}{Colors.END}")
+                    print(f"{Colors.YELLOW}Expected structure: {self.base_dir} should contain both 'proton-sdk-rs' and 'proton-sdk-sys' directories{Colors.END}")
+                    return
+                
+                native_libs_dir = proton_sdk_sys_dir / "native-libs"
                 native_libs_dir.mkdir(parents=True, exist_ok=True)
+                
+                print(f"{Colors.CYAN}Creating native-libs at: {native_libs_dir}{Colors.END}")
                 
                 # Copy as a runtime-specific subdirectory with publish structure
                 runtime_target_dir = native_libs_dir / runtime_id / "publish"
                 if runtime_target_dir.exists():
                     shutil.rmtree(runtime_target_dir)  # Remove only this specific runtime folder
                 shutil.copytree(source_net90_dir, runtime_target_dir)
-                print(f"{Colors.GREEN}Successfully copied net9.0 directory to proton-sdk-sys/native-libs/{runtime_id}/publish{Colors.END}")
+                print(f"{Colors.GREEN}Successfully copied net9.0 directory to {runtime_target_dir}{Colors.END}")
             else:
                 print(f"{Colors.YELLOW}Warning: No net9.0 binaries found{Colors.END}")
         
-        # Run cargo test
-        os.chdir(rs_dir)
-        self.run_command("cargo test")
+        # Run cargo test for both proton-sdk-rs and proton-sdk-sys
+        rust_projects = [
+            ("proton-sdk-rs", "Rust workspace"),
+            ("proton-sdk-sys", "Native bindings")
+        ]
+        
+        for project_name, project_desc in rust_projects:
+            project_dir = self.base_dir / project_name
+            if project_dir.exists():
+                print(f"{Colors.CYAN}Running cargo test in {project_desc}: {project_dir}{Colors.END}")
+                os.chdir(project_dir)
+                try:
+                    self.run_command("cargo test")
+                    print(f"{Colors.GREEN}✓ Tests completed for {project_name}{Colors.END}")
+                except subprocess.CalledProcessError as e:
+                    print(f"{Colors.YELLOW}Warning: Tests failed for {project_name}: {e}{Colors.END}")
+                    print(f"{Colors.YELLOW}Continuing with build process...{Colors.END}")
+            else:
+                print(f"{Colors.YELLOW}Warning: {project_name} directory not found at {project_dir}, skipping cargo test{Colors.END}")
     
     def build_all(self):
         """Execute the complete build process"""

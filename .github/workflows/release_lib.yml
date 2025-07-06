@@ -20,10 +20,17 @@ jobs:
         include:
           - os: windows-latest
             runtime_id: win-x64
+            shell: pwsh
           - os: ubuntu-latest
             runtime_id: linux-x64
+            shell: bash
           - os: macos-latest
             runtime_id: osx-x64
+            shell: bash
+    
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
 
     steps:
       - name: Checkout repository
@@ -57,53 +64,67 @@ jobs:
         run: |
           brew install cmake pkg-config
 
-      - name: Setup Git Bash (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          echo "MSYSTEM=MINGW64" >> $GITHUB_ENV
-
       - name: Run build script
-        shell: bash
         run: |
           python3 build.py
         env:
           PROTON_SDK_FORCE_BUILD: "1"
 
       - name: Extract native libraries from publish folder
-        shell: bash
         run: |
-          publish_dir="proton-sdk-sys/native-libs/${{ matrix.runtime_id }}/publish"
-          
-          if [ -d "$publish_dir" ]; then
-            echo "Found publish directory: $publish_dir"
-            mkdir -p release-libs
-            cp -r "$publish_dir"/* release-libs/
+          if ($IsWindows) {
+            $publishDir = "proton-sdk-sys/native-libs/${{ matrix.runtime_id }}/publish"
             
-            echo "Contents of release libraries:"
-            ls -la release-libs/
-          else
-            echo "Error: Publish directory not found at $publish_dir"
-            echo "Available structure:"
-            find proton-sdk-sys/native-libs/ -type d 2>/dev/null || echo "native-libs not found"
-            exit 1
-          fi
+            if (Test-Path $publishDir) {
+              Write-Host "Found publish directory: $publishDir"
+              New-Item -ItemType Directory -Force -Path "release-libs"
+              Copy-Item -Path "$publishDir\*" -Destination "release-libs\" -Recurse -Force
+              
+              Write-Host "Contents of release libraries:"
+              Get-ChildItem -Path "release-libs" -Force
+            } else {
+              Write-Host "Error: Publish directory not found at $publishDir"
+              Write-Host "Available structure:"
+              if (Test-Path "proton-sdk-sys/native-libs/") {
+                Get-ChildItem -Path "proton-sdk-sys/native-libs/" -Recurse -Directory
+              } else {
+                Write-Host "native-libs not found"
+              }
+              exit 1
+            }
+          } else {
+            publish_dir="proton-sdk-sys/native-libs/${{ matrix.runtime_id }}/publish"
+            
+            if [ -d "$publish_dir" ]; then
+              echo "Found publish directory: $publish_dir"
+              mkdir -p release-libs
+              cp -r "$publish_dir"/* release-libs/
+              
+              echo "Contents of release libraries:"
+              ls -la release-libs/
+            else
+              echo "Error: Publish directory not found at $publish_dir"
+              echo "Available structure:"
+              find proton-sdk-sys/native-libs/ -type d 2>/dev/null || echo "native-libs not found"
+              exit 1
+            fi
+          }
 
       - name: Create platform archive
-        shell: bash
         run: |
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            7z a "proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.zip" ./release-libs/*
-            echo "ARCHIVE_NAME=proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.zip" >> $GITHUB_ENV
-          else
+          if ($IsWindows) {
+            Compress-Archive -Path "release-libs\*" -DestinationPath "proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.zip"
+          } else {
             tar -czf "proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.tar.gz" -C release-libs .
-            echo "ARCHIVE_NAME=proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.tar.gz" >> $GITHUB_ENV
           fi
 
       - name: Upload archive as artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.runtime_id }}-native-libs
-          path: ${{ env.ARCHIVE_NAME }}
+          path: |
+            proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.zip
+            proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.tar.gz
 
   create-beta-release:
     name: Create Beta Release
