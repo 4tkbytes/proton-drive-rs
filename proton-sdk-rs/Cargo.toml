@@ -2,10 +2,11 @@
 name = "proton-sdk-rs"
 version = "0.1.0"
 edition = "2024"
+authors = ["tk <4tkbytes@pm.me>"]
 license = "MIT"
-description = "A rust binding for the Proton Apps SDK such as Proton Drive. Currently a WIP"
+description = "A safe rust binding for the Proton Apps SDK such as Proton Drive, derived from proton-sdk-sys. Currently a WIP"
 repository = "https://github.com/4tkbytes/proton-sdk-rs"
-readme = "README.md"
+readme = "../README.md"
 
 [features]
 drive = []

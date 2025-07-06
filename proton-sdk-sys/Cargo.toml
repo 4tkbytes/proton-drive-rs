@@ -2,10 +2,16 @@
 name = "proton-sdk-sys"
 version = "0.1.0"
 edition = "2024"
+authors = ["tk <4tkbytes@pm.me>"]
+license = "MIT"
+description = "An unsafe rust binding for the Proton Apps SDK. Currently a WIP"
+repository = "https://github.com/4tkbytes/proton-sdk-rs"
+readme = "../README.md"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+anyhow = "1.0.98"
 libc = "0.2"
 libloading = "0.8"
