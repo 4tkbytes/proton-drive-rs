@@ -9,7 +9,6 @@ on:
 jobs:
   build:
     strategy:
-      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         include:
@@ -81,18 +80,27 @@ jobs:
         path: ~/.nuget/packages
         key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
 
+    - name: Debug working directory and files
+      run: |
+        echo "Current working directory: $(pwd)"
+        echo "Contents of current directory:"
+        ls -la
+        echo "Contents of subdirectories:"
+        find . -maxdepth 2 -type d -name "*" | head -20
+
     - name: Run build script
       run: python3 build.py
       working-directory: ${{ github.workspace }}
 
     - name: Run Rust tests
       run: cargo test --verbose
+      working-directory: ${{ github.workspace }}/proton-sdk-rs
 
     - name: Upload native libraries
       uses: actions/upload-artifact@v4
       with:
         name: native-libs-${{ matrix.target }}
-        path: proton-sdk-sys/native-libs/
+        path: proton-sdk-sys/native-libs/${{ matrix.target }}/publish/
         retention-days: 7
 
   release:

@@ -49,13 +49,21 @@ Colors.disable_on_windows()
 
 class BuildScript:
     def __init__(self, base_dir=None, arch=None):
-        # If we're in proton-sdk-rs/proton-sdk-rs, go up two levels to the parent
-        # If we're in proton-sdk-rs, go up one level to the parent
+        # Determine the correct base directory for cloning dependencies
         if base_dir:
             self.base_dir = Path(base_dir)
         else:
             current_dir = Path.cwd()
-            if current_dir.name == "proton-sdk-rs" and current_dir.parent.name == "proton-sdk-rs":
+            # Check if we have indicators that we're in the main repo (has Cargo.toml, build.py, etc.)
+            has_cargo_toml = (current_dir / "Cargo.toml").exists()
+            has_build_script = (current_dir / "build.py").exists()
+            has_proton_sdk_rs_subdir = (current_dir / "proton-sdk-rs").exists()
+            
+            if has_cargo_toml and has_build_script and has_proton_sdk_rs_subdir:
+                # We're in the main repo directory in CI - use current directory as base
+                self.base_dir = current_dir
+                print(f"{Colors.CYAN}Detected CI environment - using current directory as base: {current_dir}{Colors.END}")
+            elif current_dir.name == "proton-sdk-rs" and current_dir.parent.name == "proton-sdk-rs":
                 # We're in the inner proton-sdk-rs directory
                 self.base_dir = current_dir.parent.parent
             elif current_dir.name == "proton-sdk-rs":
@@ -70,6 +78,9 @@ class BuildScript:
         self.local_nuget_repo = Path.home() / "local-nuget-repository"
         self.required_tools = ['git', 'dotnet', 'cargo', 'rustc', 'go', 'gcc']
         self.optional_tools = ['dos2unix']  # Tools that are helpful but not required
+        
+        print(f"{Colors.CYAN}Base directory set to: {self.base_dir}{Colors.END}")
+        print(f"{Colors.CYAN}Current working directory: {Path.cwd()}{Colors.END}")
         
     def _detect_arch(self):
         """Detect system architecture"""
@@ -331,13 +342,13 @@ class BuildScript:
             # Build the Go library
             cmd = [
                 "go", "build", 
-                f"-C", str(go_src_dir),
+                "-C", str(go_src_dir),
                 f"-buildmode={build_mode}",
                 "-o", str(output_file_path)
             ]
             
             try:
-                result = subprocess.run(
+                subprocess.run(
                     cmd,
                     env=go_env,
                     cwd=crypto_dir,
@@ -368,9 +379,9 @@ class BuildScript:
         # Create local nuget repository
         local_nuget_temp = crypto_dir / "local-nuget-repository"
         
-        # Pack the project
+        # Pack the project with multiple target frameworks
         self.run_command(
-            f'dotnet pack -c Release -p:Version=1.0.0 '
+            f'dotnet pack -c Release -p:Version=1.0.0 -p:TargetFrameworks="net8.0;net9.0" '
             f'src/dotnet/Proton.Cryptography.csproj --output {local_nuget_temp}'
         )
         
@@ -457,12 +468,38 @@ class BuildScript:
         
         os.chdir(src_dir)
         
+        # Configure NuGet sources to include both nuget.org and local repository
+        print(f"{Colors.BLUE}Configuring NuGet sources...{Colors.END}")
+        try:
+            # Clear existing sources first and list them
+            self.run_command('dotnet nuget list source', capture_output=True)
+            
+            # Add nuget.org if not already present
+            try:
+                self.run_command('dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org')
+            except subprocess.CalledProcessError:
+                print(f"{Colors.YELLOW}nuget.org source may already exist{Colors.END}")
+            
+            # Add local repository
+            try:
+                self.run_command(f'dotnet nuget add source "{self.local_nuget_repo}" -n ProtonRepository')
+            except subprocess.CalledProcessError:
+                print(f"{Colors.YELLOW}ProtonRepository source may already exist{Colors.END}")
+            
+            print(f"{Colors.GREEN}NuGet sources configured{Colors.END}")
+        except subprocess.CalledProcessError:
+            print(f"{Colors.YELLOW}Warning: Could not configure NuGet sources, continuing...{Colors.END}")
+        
         # Add Proton.Cryptography package to each project folder
         for folder in src_dir.iterdir():
             if folder.is_dir() and (folder / f"{folder.name}.csproj").exists():
                 print(f"{Colors.BLUE}Adding package to {folder.name}{Colors.END}")
                 os.chdir(folder)
                 try:
+                    # First restore packages to ensure dependencies are available
+                    self.run_command('dotnet restore')
+                    
+                    # Then add the package
                     self.run_command(
                         f'dotnet add package Proton.Cryptography -s "{self.local_nuget_repo}"'
                     )
@@ -490,6 +527,14 @@ class BuildScript:
                 lib_suffix = ".so"  # fallback
             
             print(f"{Colors.BLUE}Publishing with AOT for runtime: {runtime_id}{Colors.END}")
+            
+            # Restore packages first to ensure all dependencies are available
+            print(f"{Colors.BLUE}Restoring packages for {drive_project.name}...{Colors.END}")
+            try:
+                self.run_command(f'dotnet restore "{drive_project}"')
+                print(f"{Colors.GREEN}Package restore completed{Colors.END}")
+            except subprocess.CalledProcessError as e:
+                print(f"{Colors.YELLOW}Warning: Package restore failed, continuing with build: {e}{Colors.END}")
             
             # Special handling for Windows - skip AOT if crypto library is incompatible
             if self.os_name == 'windows':
@@ -549,7 +594,13 @@ class BuildScript:
         """Build proton-sdk-rs"""
         print(f"{Colors.BOLD}{Colors.CYAN}=== Building proton-sdk-rs ==={Colors.END}")
         
-        rs_dir = self.base_dir / "proton-sdk-rs"
+        # Determine the correct rust directory path
+        if (self.base_dir / "proton-sdk-rs").exists():
+            # Standard case - proton-sdk-rs is a subdirectory
+            rs_dir = self.base_dir / "proton-sdk-rs"
+        else:
+            # CI case - we're already in the main repo
+            rs_dir = self.base_dir
         
         # Find and copy .NET binaries from the AOT-compiled CExports project
         sdk_src_dir = self.base_dir / "Proton.SDK" / "src"
@@ -566,21 +617,34 @@ class BuildScript:
             runtime_id = f"{self.os_name}-{dotnet_arch}"
         
         # Look for the specific AOT-compiled output directory
+        # First try the publish directory (AOT output)
+        aot_publish_dir = sdk_src_dir / "Proton.Sdk.Drive.CExports" / "bin" / "Release" / "net9.0" / runtime_id / "publish"
         aot_output_dir = sdk_src_dir / "Proton.Sdk.Drive.CExports" / "bin" / "Release" / "net9.0" / runtime_id
         
-        if aot_output_dir.exists():
-            print(f"{Colors.BLUE}Copying AOT-compiled binaries from:{Colors.END} {aot_output_dir}")
+        source_dir = None
+        if aot_publish_dir.exists():
+            print(f"{Colors.BLUE}Found AOT published binaries at:{Colors.END} {aot_publish_dir}")
+            source_dir = aot_publish_dir
+        elif aot_output_dir.exists():
+            print(f"{Colors.BLUE}Found AOT output binaries at:{Colors.END} {aot_output_dir}")
+            source_dir = aot_output_dir
+        
+        if source_dir:
+            print(f"{Colors.BLUE}Copying AOT-compiled binaries from:{Colors.END} {source_dir}")
             
             # Create native-libs directory if it doesn't exist
             native_libs_dir = rs_dir / "proton-sdk-sys" / "native-libs"
             native_libs_dir.mkdir(parents=True, exist_ok=True)
             
-            # Copy the runtime folder into native-libs (don't replace, just add/update this runtime)
-            runtime_target_dir = native_libs_dir / runtime_id
+            # Copy the runtime folder into native-libs with publish subdirectory
+            runtime_target_dir = native_libs_dir / runtime_id / "publish"
+            runtime_target_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Remove existing contents and copy new ones
             if runtime_target_dir.exists():
-                shutil.rmtree(runtime_target_dir)  # Remove only this specific runtime folder
-            shutil.copytree(aot_output_dir, runtime_target_dir)
-            print(f"{Colors.GREEN}Successfully copied {runtime_id} AOT binaries to proton-sdk-sys/native-libs/{runtime_id}{Colors.END}")
+                shutil.rmtree(runtime_target_dir)
+            shutil.copytree(source_dir, runtime_target_dir)
+            print(f"{Colors.GREEN}Successfully copied {runtime_id} AOT binaries to proton-sdk-sys/native-libs/{runtime_id}/publish{Colors.END}")
         else:
             print(f"{Colors.YELLOW}Warning: AOT output directory not found at {aot_output_dir}{Colors.END}")
             
@@ -598,12 +662,12 @@ class BuildScript:
                 native_libs_dir = rs_dir / "proton-sdk-sys" / "native-libs"
                 native_libs_dir.mkdir(parents=True, exist_ok=True)
                 
-                # Copy as a runtime-specific subdirectory
-                runtime_target_dir = native_libs_dir / runtime_id
+                # Copy as a runtime-specific subdirectory with publish structure
+                runtime_target_dir = native_libs_dir / runtime_id / "publish"
                 if runtime_target_dir.exists():
                     shutil.rmtree(runtime_target_dir)  # Remove only this specific runtime folder
                 shutil.copytree(source_net90_dir, runtime_target_dir)
-                print(f"{Colors.GREEN}Successfully copied net9.0 directory to proton-sdk-sys/native-libs/{runtime_id}{Colors.END}")
+                print(f"{Colors.GREEN}Successfully copied net9.0 directory to proton-sdk-sys/native-libs/{runtime_id}/publish{Colors.END}")
             else:
                 print(f"{Colors.YELLOW}Warning: No net9.0 binaries found{Colors.END}")
         
