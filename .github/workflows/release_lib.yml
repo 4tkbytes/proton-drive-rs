@@ -24,9 +24,10 @@ jobs:
           - os: ubuntu-latest
             runtime_id: linux-x64
             shell: bash
-          - os: macos-latest
-            runtime_id: osx-x64
-            shell: bash
+        #   - os: macos-latest
+        #     runtime_id: osx-x64
+        #     shell: bash
+        # dont have a mac so cant test out tweaks :(
     
     defaults:
       run:
