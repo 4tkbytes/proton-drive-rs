@@ -1,16 +1,42 @@
+/// This module provides the data structures "translated" into rust as shown in proton_sdk.h
+pub mod data;
 #[cfg(test)]
 pub mod tests;
-pub mod client;
+
+use libloading::Library;
+use std::{path::PathBuf, sync::{Mutex, Once}};
 
 pub struct ProtonSDKLib {
     pub sdk_library: Library,
     pub location: PathBuf,
 }
 
+static INIT: Once = Once::new();
+static mut PROTON_SDK_INSTANCE: Option<ProtonSDKLib> = None;
+
 impl ProtonSDKLib {
+    pub fn instance() -> anyhow::Result<&'static Self> {
+        unsafe {
+            INIT.call_once(|| {
+                match Self::load_internal() {
+                    Ok(instance) => {
+                        PROTON_SDK_INSTANCE = Some(instance);
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to initialise ProtonSDKLib: {}", e);
+                    }
+                }
+            });
+
+            PROTON_SDK_INSTANCE
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Failed to initialise ProtonSDKLib"))
+        }
+    }
+
     /// This function loads the library and returns an instance
     /// of the ProtonSDKLib
-    pub unsafe fn load() -> anyhow::Result<Self> {
+    unsafe fn load_internal() -> anyhow::Result<Self> {
         let (lib, location) = Self::call_sdk_lib()?;
         Ok(Self {
             sdk_library: lib,
@@ -26,10 +52,9 @@ impl ProtonSDKLib {
             Err(e) => {
                 eprintln!("Failed to load library from {}: {}", library_path.display(), e);
                 
-                // Try fallback locations
                 for fallback_path in Self::get_fallback_paths() {
                     if let Ok(lib) = Library::new(&fallback_path) {
-                        return Ok((lib, library_path));
+                        return Ok((lib, fallback_path));
                     }
                 }
                 
@@ -108,13 +133,3 @@ impl ProtonSDKLib {
         paths
     }
 }
-
-use libloading::Library;
-use std::path::PathBuf;
-
-#[repr(C)]
-struct ByteArray {
-    pointer: *const u8,
-    length: usize,
-}
-

@@ -570,6 +570,48 @@ class BuildScript:
         else:
             print(f"{Colors.YELLOW}Warning: Proton.Sdk.Drive.CExports.csproj not found{Colors.END}")
     
+    def copy_protobufs(self):
+        """Copy protobuf files from Proton.SDK to proton-sdk-sys"""
+        print(f"{Colors.BOLD}{Colors.CYAN}=== Copying protobuf files ==={Colors.END}")
+        
+        # Source protobuf directory
+        source_proto_dir = self.base_dir / "Proton.SDK" / "protos"
+        
+        # Target protobuf directory in proton-sdk-sys
+        proton_sdk_sys_dir = self.base_dir / "proton-sdk-sys"
+        target_proto_dir = proton_sdk_sys_dir / "protos"
+        
+        if not source_proto_dir.exists():
+            print(f"{Colors.YELLOW}Warning: Source protobuf directory not found at {source_proto_dir}{Colors.END}")
+            return
+        
+        if not proton_sdk_sys_dir.exists():
+            print(f"{Colors.RED}Error: Cannot find proton-sdk-sys directory at {proton_sdk_sys_dir}{Colors.END}")
+            return
+        
+        # Create target directory if it doesn't exist
+        target_proto_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Remove existing proto files to ensure clean copy
+        if target_proto_dir.exists():
+            for existing_file in target_proto_dir.glob("*.proto"):
+                existing_file.unlink()
+                print(f"{Colors.YELLOW}Removed existing: {existing_file.name}{Colors.END}")
+        
+        # Copy all .proto files
+        copied_files = []
+        for proto_file in source_proto_dir.glob("*.proto"):
+            target_file = target_proto_dir / proto_file.name
+            shutil.copy2(proto_file, target_file)
+            copied_files.append(proto_file.name)
+            print(f"{Colors.GREEN}Copied: {proto_file.name}{Colors.END}")
+        
+        if copied_files:
+            print(f"{Colors.GREEN}Successfully copied {len(copied_files)} protobuf files to {target_proto_dir}{Colors.END}")
+            print(f"{Colors.CYAN}Copied files: {', '.join(copied_files)}{Colors.END}")
+        else:
+            print(f"{Colors.YELLOW}No .proto files found in {source_proto_dir}{Colors.END}")
+
     def build_proton_sdk_rs(self):
         """Build proton-sdk-rs"""
         print(f"{Colors.BOLD}{Colors.CYAN}=== Building proton-sdk-rs ==={Colors.END}")
@@ -700,6 +742,9 @@ class BuildScript:
             else:
                 print(f"{Colors.YELLOW}Warning: No net9.0 binaries found{Colors.END}")
     
+        # Copy protobuf files AFTER libraries are copied but BEFORE cargo tests
+        self.copy_protobufs()
+    
         # Run cargo test for both proton-sdk-rs and proton-sdk-sys
         rust_projects = [
             ("proton-sdk-rs", "Rust workspace"),
@@ -719,7 +764,7 @@ class BuildScript:
                     print(f"{Colors.YELLOW}Continuing with build process...{Colors.END}")
             else:
                 print(f"{Colors.YELLOW}Warning: {project_name} directory not found at {project_dir}, skipping cargo test{Colors.END}")
-    
+
     def build_all(self):
         """Execute the complete build process"""
         try:
@@ -764,7 +809,7 @@ def main():
     )
     parser.add_argument(
         "--step", 
-        choices=["clone", "crypto", "sdk", "rust", "all"],
+        choices=["clone", "crypto", "sdk", "rust", "protos", "all"],
         default="all",
         help="Run specific build step only"
     )
@@ -783,6 +828,8 @@ def main():
         builder.build_proton_sdk()
     elif args.step == "rust":
         builder.build_proton_sdk_rs()
+    elif args.step == "protos":
+        builder.copy_protobufs()
 
 
 if __name__ == "__main__":

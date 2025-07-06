@@ -1,0 +1,267 @@
+syntax = "proto3";
+
+option csharp_namespace = "Proton.Sdk.Drive";
+
+import "account.proto";
+
+enum DevicePlatform {
+    DEVICE_PLATFORM_INVALID = 0;
+    DEVICE_PLATFORM_WINDOWS = 1;
+    DEVICE_PLATFORM_MACOS = 2;
+}
+
+enum FileSampleType {
+    FILE_SAMPLE_TYPE_INVALID = 0;
+    FILE_SAMPLE_TYPE_THUMBNAIL = 1;
+    FILE_SAMPLE_TYPE_PREVIEW = 2;
+}
+
+enum MemberPermissions {
+    MEMBER_PERMISSIONS_INVALID = 0;
+    MEMBER_PERMISSIONS_WRITE = 2;
+    MEMBER_PERMISSIONS_READ = 4;
+    MEMBER_PERMISSIONS_ADMIN = 16;
+}
+
+enum MemberState {
+    MEMBER_STATE_INVALID = 0;
+    MEMBER_STATE_ACTIVE = 1;
+    MEMBER_STATE_LOCKED = 2;
+}
+
+enum ShareState {
+    SHARE_STATE_INVALID = 0;
+    SHARE_STATE_ACTIVE = 1;
+    SHARE_STATE_DELETED = 2;
+    SHARE_STATE_RESTORED = 3;
+}
+
+enum ShareType {
+    SHARE_TYPE_INVALID = 0;
+    SHARE_TYPE_MAIN = 1;
+    SHARE_TYPE_STANDARD = 2;
+    SHARE_TYPE_DEVICE = 3;
+    SHARE_TYPE_PHOTOS = 4;
+}
+
+enum VolumeEventType {
+    // A file or folder was garbage collected or moved out of share view.
+    VOLUME_EVENT_TYPE_DELETE = 0;
+
+    // A file or folder was created or moved into a share view. For files, it is
+    // generated when the first revision is committed.
+    VOLUME_EVENT_TYPE_CREATE = 1;
+
+    // File contents were updated.
+    VOLUME_EVENT_TYPE_UPDATE = 2;
+
+    // File or folder metadata was updated. Includes updates to name, parent link,
+    // shares, share URLs, and state (active, trashed, permanently deleted).
+    VOLUME_EVENT_TYPE_UPDATE_METADATA = 3;
+}
+
+enum VolumeState {
+    VOLUME_STATE_NONE = 0;
+    VOLUME_STATE_ACTIVE = 1;
+    VOLUME_STATE_DELETED = 2;
+    VOLUME_STATE_LOCKED = 3;
+    VOLUME_STATE_RESTORED = 4;
+}
+
+// Mark: - Nodes
+
+message FileNode {
+    NodeIdentity node_identity = 1;
+    optional LinkId parent_id = 2;
+    string name = 3;
+    bytes name_hash_digest = 4;
+    NodeState state = 5;
+    optional Revision active_revision = 6;
+}
+
+message FolderNode {
+    NodeIdentity node_identity = 1;
+    optional LinkId parent_id = 2;
+    string name = 3;
+    bytes name_hash_digest = 4;
+    NodeState state = 5;
+}
+
+message NodeIdentity {
+    LinkId node_id = 1;
+    ShareId share_id = 2;
+    VolumeId volume_id = 3;
+}
+
+enum NodeState {
+    NODE_STATE_DRAFT = 0;
+    NODE_STATE_ACTIVE = 1;
+    NODE_STATE_TRASHED = 2;
+}
+
+message ShareMetadata {
+    ShareId share_id = 1;
+    AddressId membership_address_id = 2;
+    string membership_email_address = 3;
+}
+
+message Share {
+    ShareId share_id = 1;
+    AddressId membership_address_id = 2;
+    string membership_email_address = 3;
+    VolumeId volume_id = 4;
+    LinkId root_node_id = 5;
+}
+
+message RevisionMetadata {
+    RevisionId revision_id = 1;
+    RevisionState state = 2;
+    optional bytes manifest_signature = 3;
+    optional string signature_email_address = 4;
+    repeated bytes samples_sha256_digests = 5;
+}
+
+message Revision {
+    RevisionId revision_id = 1;
+    RevisionState state = 2;
+    optional bytes manifest_signature = 3;
+    optional string signature_email_address = 4;
+    repeated bytes samples_sha256_digests = 5;
+
+    VolumeId volume_id = 6;
+    LinkId file_id = 7;
+    optional int64 size = 8;
+    int64 quota_consumption = 9;
+    int64 creation_time = 10;
+}
+
+enum RevisionState {
+    REVISION_STATE_DRAFT = 0;
+    REVISION_STATE_ACTIVE = 1;
+    REVISION_STATE_SUPERSEDED = 2;
+}
+
+message ShareBasedRevisionIdentity {
+    ShareId share_id = 1;
+    LinkId node_id = 2;
+    RevisionId revision_id = 3;
+}
+
+// Mark: - Downloads
+
+message FileDownloadRequest {
+    NodeIdentity file_identity = 1;
+    optional RevisionMetadata revision_metadata = 2;
+    string target_file_path = 3;
+    OperationIdentifier operation_id = 4;
+}
+
+// Mark: - Uploads
+
+// Response: IntResponse
+message FileUploaderCreationRequest {
+    int64 file_size = 1;
+    int32 number_of_samples = 2;
+}
+
+message FileUploadRequest {
+    ShareMetadata share_metadata = 1;
+    NodeIdentity parent_folder_identity = 2;
+    string name = 3;
+    string mimeType = 4;
+    string source_file_path = 5;
+    optional bytes thumbnail = 6;
+    int64 last_modification_date = 7;
+    OperationIdentifier operation_id = 8;
+}
+
+message FileUploadResponse {
+    FileNode file = 1;
+    Revision revision = 2;
+}
+
+// Response is a Revision
+message RevisionUploadRequest {
+    NodeIdentity file_identity = 1;
+    ShareMetadata share_metadata = 2;
+    optional RevisionMetadata revision_metadata = 3;
+    optional bytes thumbnail = 4;
+    int64 last_modification_date = 5;
+    string source_file_path = 6; // Do we need this?
+    OperationIdentifier operation_id = 7;
+}
+
+message ProgressUpdate {
+    int64 bytes_completed = 1;
+    int64 bytes_in_total = 2;
+}
+
+// Mark: - Other operations
+
+// Object initialization
+
+message ProtonDriveClientCreateRequest {
+    ClientId client_id = 1;
+}
+
+// Verification
+
+enum VerificationStatus {
+    VERIFICATION_STATUS_OK = 0;
+    VERIFICATION_STATUS_NOT_SIGNED = 1;
+    VERIFICATION_STATUS_NO_VERIFIER = 2;
+    VERIFICATION_STATUS_FAILED = 3;
+    VERIFICATION_STATUS_BAD_CONTEXT = 4;
+}
+
+message VerificationStatusResponse {
+    VerificationStatus verification_status = 1;
+}
+
+// macOS Only
+
+enum Status {
+    STATUS_OK = 0;
+    STATUS_NOT_OK = 1;
+}
+
+// Identifiers
+
+message LinkId {
+    string value = 1;
+}
+message VolumeId {
+    string value = 1;
+}
+message ShareId {
+    string value = 1;
+}
+message DeviceId {
+    string value = 1;
+}
+message RevisionId {
+    string value = 1;
+}
+message ClientId {
+    string value = 1;
+}
+
+// Cryptography
+
+message ShareKeyRegistrationRequest {
+    StringResponse share_id = 1;
+    bytes share_key_raw_unlocked_data = 2;
+}
+
+message NodeKeysRegistrationRequest {
+    NodeIdentity node_identity = 1;
+    bytes node_key_raw_unlocked_data = 2;
+    optional bytes content_key_raw_unlocked_data = 3;
+    optional bytes hash_key_raw_unlocked_data = 4;
+}
+
+message NodeNameDecryptionRequest {
+    NodeIdentity node_identity = 1;
+    string armored_encrypted_name = 2;
+    optional string signature_email_address = 3;
+}

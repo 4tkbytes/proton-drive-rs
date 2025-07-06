@@ -1,7 +1,7 @@
 [package]
 name = "proton-sdk-sys"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 authors = ["tk <4tkbytes@pm.me>"]
 license = "MIT"
 description = "An unsafe rust binding for the Proton Apps SDK. Currently a WIP"

@@ -1,0 +1,219 @@
+syntax = "proto3";
+
+option csharp_namespace = "Proton.Sdk";
+
+// Mark: - Users
+
+message UserKey {
+    UserKeyId key_id = 1;
+    bytes key_data = 2;
+}
+
+message ArmoredUserKey {
+    UserKeyId key_id = 1;
+    bytes armored_key_data = 2;
+    string passphrase = 3;
+}
+
+enum AddressStatus {
+    ADDRESS_STATUS_DISABLED = 0;
+    ADDRESS_STATUS_ENABLED = 1;
+    ADDRESS_STATUS_DELETING = 2;
+}
+
+enum AddressKeyFlags {
+    ADDRESS_KEY_FLAGS_NONE = 0;
+    ADDRESS_KEY_FLAGS_IS_ALLOWED_FOR_SIGNATURE_VERIFICATION = 1;
+    ADDRESS_KEY_FLAGS_IS_ALLOWED_FOR_ENCRYPTION = 2;
+}
+
+enum PasswordMode {
+    PASSWORD_MODE_UNKNOWN_PASSWORD_MODE = 0;
+    PASSWORD_MODE_SINGLE = 1;
+    PASSWORD_MODE_DUAL = 2;
+}
+
+enum DelinquentState {
+    DELINQUENT_STATE_PAID = 0;
+    DELINQUENT_STATE_AVAILABLE = 1;
+    DELINQUENT_STATE_OVERDUE = 2;
+    DELINQUENT_STATE_DELINQUENT = 3;
+    DELINQUENT_STATE_NOT_RECEIVED = 4;
+}
+
+enum UserType {
+    USER_TYPE_UNKNOWN = 0;
+    USER_TYPE_PROTON = 1;
+    USER_TYPE_MANAGED = 2;
+    USER_TYPE_EXTERNAL = 3;
+}
+
+// Mark: - Sessions
+
+message ProtonClientOptions {
+    string app_version = 1;
+    optional string user_agent = 2;
+    optional string base_url = 3;
+    optional bool disable_tls_pinning = 4;
+    optional bool ignore_ssl_certificate_errors = 5;
+    optional int64 logger_provider_handle = 6;
+}
+
+message SessionBeginRequest {
+    string username = 1;
+    string password = 2;
+    optional ProtonClientOptions options = 3;
+}
+
+message SessionResumeRequest {
+    SessionId session_id = 1;
+    string username = 2;
+    UserId user_id = 3;
+    string access_token = 4;
+    string refresh_token = 5;
+    repeated string scopes = 6;
+    bool is_waiting_for_second_factor_code = 7;
+    PasswordMode password_mode = 8;
+    ProtonClientOptions options = 9;
+}
+
+message SessionRenewRequest {
+    SessionId session_id = 2;
+    string access_token = 3;
+    string refresh_token = 4;
+    repeated string scopes = 5;
+    bool is_waiting_for_second_factor_code = 6;
+    PasswordMode password_mode = 7;
+}
+
+message SessionEndRequest {
+    int64 session_handle = 1;
+}
+
+message SessionTokens {
+    string access_token = 1;
+    string refresh_token = 2;
+}
+
+// Events
+
+message LogEvent {
+    int32 level = 1;
+    string message = 2;
+    string category_name = 3;
+}
+
+// Response body passing
+
+enum OperationType {
+    OPERATION_TYPE_INVALID = 0;
+    OPERATION_TYPE_DOWNLOAD = 1;
+    OPERATION_TYPE_FILE_UPLOAD = 2;
+    OPERATION_TYPE_REVISION_UPLOAD = 3;
+}
+
+message OperationIdentifier {
+    OperationType type = 1;
+    string identifier = 2;
+    string timestamp = 3;
+}
+
+enum RequestMethod {
+    REQUEST_METHOD_INVALID = 0;
+    REQUEST_METHOD_GET = 1;
+    REQUEST_METHOD_POST = 2;
+    REQUEST_METHOD_PUT = 3;
+    REQUEST_METHOD_DELETE = 4;
+}
+
+message RequestResponseBodyResponse {
+    OperationIdentifier operationId = 1;
+    RequestMethod method = 2;
+    string url = 3;
+    string requestBody = 4;
+    string responseBody = 5;
+}
+
+// Mark: - Responses
+
+enum ErrorDomain {
+    Undefined = 0;
+    SuccessfulCancellation = 1;
+    Api = 2;
+    Network = 3;
+    Transport = 4;
+    Serialization = 5;
+    Cryptography = 6;
+    DataIntegrity = 7;
+}
+
+message Error {
+    string type = 1;
+    string message = 2;
+    ErrorDomain domain = 3;
+    optional int64 primary_code = 4;
+    optional int64 secondary_code = 5;
+    optional string context = 6;
+    optional Error inner_error = 7;
+}
+
+message StringResponse {
+    string value = 1;
+}
+
+message IntResponse {
+    int64 value = 1;
+}
+
+message Empty {
+}
+
+// Identifiers
+
+message SessionId {
+    string value = 1;
+}
+
+message UserId {
+    string value = 1;
+}
+
+message UserKeyId {
+    string value = 1;
+}
+
+message AddressId {
+    string value = 1;
+}
+
+message AddressKeyId {
+    string value = 1;
+}
+
+message AddressKey {
+    AddressId address_id = 1;
+    AddressKeyId address_key_id = 2;
+    bool is_allowed_for_encryption = 3;
+}
+
+// Cryptography
+
+message AddressKeyWithData {
+    AddressKeyId address_key_id = 1;
+    bool is_primary = 2;
+    bool is_allowed_for_encryption = 3;
+    bytes raw_unlocked_data = 4;
+}
+
+message AddressKeyRegistrationRequest {
+    AddressId address_id = 1;
+    repeated AddressKeyWithData keys = 2;
+}
+
+message KeyCacheMissMessage {
+    string holder_id = 1;
+    string holder_name = 2;
+    optional string context_id = 3;
+    optional string context_name = 4;
+    string value_name = 5;
+}
