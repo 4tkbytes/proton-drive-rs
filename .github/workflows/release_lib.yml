@@ -70,53 +70,57 @@ jobs:
         env:
           PROTON_SDK_FORCE_BUILD: "1"
 
-      - name: Extract native libraries from publish folder
+      - name: Extract native libraries from publish folder (Windows)
+        if: matrix.os == 'windows-latest'
         run: |
-          if ($IsWindows) {
-            $publishDir = "proton-sdk-sys/native-libs/${{ matrix.runtime_id }}/publish"
+          $publishDir = "proton-sdk-sys/native-libs/${{ matrix.runtime_id }}/publish"
+          
+          if (Test-Path $publishDir) {
+            Write-Host "Found publish directory: $publishDir"
+            New-Item -ItemType Directory -Force -Path "release-libs"
+            Copy-Item -Path "$publishDir\*" -Destination "release-libs\" -Recurse -Force
             
-            if (Test-Path $publishDir) {
-              Write-Host "Found publish directory: $publishDir"
-              New-Item -ItemType Directory -Force -Path "release-libs"
-              Copy-Item -Path "$publishDir\*" -Destination "release-libs\" -Recurse -Force
-              
-              Write-Host "Contents of release libraries:"
-              Get-ChildItem -Path "release-libs" -Force
-            } else {
-              Write-Host "Error: Publish directory not found at $publishDir"
-              Write-Host "Available structure:"
-              if (Test-Path "proton-sdk-sys/native-libs/") {
-                Get-ChildItem -Path "proton-sdk-sys/native-libs/" -Recurse -Directory
-              } else {
-                Write-Host "native-libs not found"
-              }
-              exit 1
-            }
+            Write-Host "Contents of release libraries:"
+            Get-ChildItem -Path "release-libs" -Force
           } else {
-            publish_dir="proton-sdk-sys/native-libs/${{ matrix.runtime_id }}/publish"
-            
-            if [ -d "$publish_dir" ]; then
-              echo "Found publish directory: $publish_dir"
-              mkdir -p release-libs
-              cp -r "$publish_dir"/* release-libs/
-              
-              echo "Contents of release libraries:"
-              ls -la release-libs/
-            else
-              echo "Error: Publish directory not found at $publish_dir"
-              echo "Available structure:"
-              find proton-sdk-sys/native-libs/ -type d 2>/dev/null || echo "native-libs not found"
-              exit 1
-            fi
+            Write-Host "Error: Publish directory not found at $publishDir"
+            Write-Host "Available structure:"
+            if (Test-Path "proton-sdk-sys/native-libs/") {
+              Get-ChildItem -Path "proton-sdk-sys/native-libs/" -Recurse -Directory
+            } else {
+              Write-Host "native-libs not found"
+            }
+            exit 1
           }
 
-      - name: Create platform archive
+      - name: Extract native libraries from publish folder (Linux/macOS)
+        if: matrix.os != 'windows-latest'
         run: |
-          if ($IsWindows) {
-            Compress-Archive -Path "release-libs\*" -DestinationPath "proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.zip"
-          } else {
-            tar -czf "proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.tar.gz" -C release-libs .
+          publish_dir="proton-sdk-sys/native-libs/${{ matrix.runtime_id }}/publish"
+          
+          if [ -d "$publish_dir" ]; then
+            echo "Found publish directory: $publish_dir"
+            mkdir -p release-libs
+            cp -r "$publish_dir"/* release-libs/
+            
+            echo "Contents of release libraries:"
+            ls -la release-libs/
+          else
+            echo "Error: Publish directory not found at $publish_dir"
+            echo "Available structure:"
+            find proton-sdk-sys/native-libs/ -type d 2>/dev/null || echo "native-libs not found"
+            exit 1
           fi
+
+      - name: Create platform archive (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          Compress-Archive -Path "release-libs\*" -DestinationPath "proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.zip"
+
+      - name: Create platform archive (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          tar -czf "proton-sdk-${{ matrix.runtime_id }}-${{ github.sha }}.tar.gz" -C release-libs .
 
       - name: Upload archive as artifact
         uses: actions/upload-artifact@v4

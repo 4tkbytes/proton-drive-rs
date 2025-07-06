@@ -114,11 +114,11 @@ class BuildScript:
         # Check for MSYSTEM environment variable (set by Git Bash/MSYS2)
         msystem = os.environ.get('MSYSTEM')
         if msystem:
-            print(f"{Colors.GREEN}✓{Colors.END} Running in Git Bash/MSYS2 (MSYSTEM={msystem})")
+            print(f"{Colors.GREEN}+{Colors.END} Running in Git Bash/MSYS2 (MSYSTEM={msystem})")
         else:
-            print(f"{Colors.CYAN}ℹ{Colors.END} Running in standard Windows shell (PowerShell/CMD)")
+            print(f"{Colors.CYAN}i{Colors.END} Running in standard Windows shell (PowerShell/CMD)")
         
-        print(f"{Colors.GREEN}✓{Colors.END} Windows shell compatibility verified - Go build is now integrated")
+        print(f"{Colors.GREEN}+{Colors.END} Windows shell compatibility verified - Go build is now integrated")
 
     def run_command(self, cmd, cwd=None, shell=True, capture_output=False):
         """Run a shell command and handle errors"""
@@ -176,7 +176,7 @@ class BuildScript:
                     check=False
                 )
                 if result.returncode == 0:
-                    print(f"{Colors.GREEN}✓{Colors.END} {tool} is available")
+                    print(f"{Colors.GREEN}+{Colors.END} {tool} is available")
                 else:
                     missing_tools.append(tool)
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
@@ -193,14 +193,14 @@ class BuildScript:
                     check=False
                 )
                 if result.returncode == 0:
-                    print(f"{Colors.GREEN}✓{Colors.END} {tool} is available")
+                    print(f"{Colors.GREEN}+{Colors.END} {tool} is available")
                 else:
-                    print(f"{Colors.YELLOW}⚠{Colors.END} {tool} not found - may need manual line ending conversion")
+                    print(f"{Colors.YELLOW}!{Colors.END} {tool} not found - may need manual line ending conversion")
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
-                print(f"{Colors.YELLOW}⚠{Colors.END} {tool} not found - may need manual line ending conversion")
+                print(f"{Colors.YELLOW}!{Colors.END} {tool} not found - may need manual line ending conversion")
         
         if missing_tools:
-            print(f"{Colors.RED}✗ Missing required tools:{Colors.END} {', '.join(missing_tools)}")
+            print(f"{Colors.RED}X Missing required tools:{Colors.END} {', '.join(missing_tools)}")
             print(f"\n{Colors.YELLOW}Please install the missing tools before running the build:{Colors.END}")
             for tool in missing_tools:
                 if tool == 'git':
@@ -213,7 +213,7 @@ class BuildScript:
                     print(f"  - {Colors.CYAN}Go:{Colors.END} https://golang.org/dl/")
             sys.exit(1)
         
-        print(f"{Colors.GREEN}✓ All dependencies are available{Colors.END}")
+        print(f"{Colors.GREEN}+ All dependencies are available{Colors.END}")
 
     def clone_repositories(self):
         """Clone the required repositories (excluding proton-sdk-rs)"""
@@ -333,7 +333,7 @@ class BuildScript:
                     capture_output=True,
                     text=True
                 )
-                print(f"{Colors.GREEN}✓ Successfully built {output_file_name}{Colors.END}")
+                print(f"{Colors.GREEN}+ Successfully built {output_file_name}{Colors.END}")
             except subprocess.CalledProcessError as e:
                 print(f"{Colors.RED}Go build failed for {build_mode}:{Colors.END} {e}")
                 if e.stdout:
@@ -680,7 +680,7 @@ class BuildScript:
                 os.chdir(project_dir)
                 try:
                     self.run_command("cargo test")
-                    print(f"{Colors.GREEN}✓ Tests completed for {project_name}{Colors.END}")
+                    print(f"{Colors.GREEN}+ Tests completed for {project_name}{Colors.END}")
                 except subprocess.CalledProcessError as e:
                     print(f"{Colors.YELLOW}Warning: Tests failed for {project_name}: {e}{Colors.END}")
                     print(f"{Colors.YELLOW}Continuing with build process...{Colors.END}")
