@@ -10,7 +10,7 @@ pub mod drive;
 pub mod data;
 
 use libloading::Library;
-use log::{debug, warn};
+use log::{debug, error, warn};
 use std::{path::PathBuf, sync::{Mutex, Once}};
 
 pub struct ProtonSDKLib {
@@ -30,11 +30,13 @@ impl ProtonSDKLib {
                         PROTON_SDK_INSTANCE = Some(instance);
                     }
                     Err(e) => {
-                        eprintln!("Failed to initialise ProtonSDKLib: {}", e);
+                        error!("Failed to initialise ProtonSDKLib: {}", e);
                     }
                 }
             });
 
+            // dude stfu i do not care about this error
+            #[warn(static_mut_refs)]
             PROTON_SDK_INSTANCE
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("Failed to initialise ProtonSDKLib"))
@@ -61,7 +63,7 @@ impl ProtonSDKLib {
                 Ok((lib, library_path))
             },
             Err(e) => {
-                eprintln!("❌ Failed to load library from {}: {}", library_path.display(), e);
+                warn!("Failed to load library from {}: {}", library_path.display(), e);
                 
                 // Try fallback paths
                 for fallback_path in Self::get_fallback_paths() {
