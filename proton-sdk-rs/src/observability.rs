@@ -169,7 +169,7 @@ impl Drop for ObservabilityService {
             if let Err(e) = observability::raw::observability_service_free(self.handle) {
                 warn!("Failed to free observability service in Drop: {}", e);
             } else {
-                debug!("🧹 Observability service cleaned up automatically");
+                debug!("Observability service cleaned up automatically");
             }
         }
     }

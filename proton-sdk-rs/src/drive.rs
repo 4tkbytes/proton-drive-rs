@@ -1,6 +1,6 @@
 use std::fmt;
 
-use log::{debug, warn};
+use log::{debug, error, warn};
 use proton_sdk_sys::{drive::{self, DriveClientHandle}, observability::{self, ObservabilityHandle}, protobufs::{NodeKeysRegistrationRequest, ProtonDriveClientCreateRequest, ShareKeyRegistrationRequest, ToByteArray}, sessions::SessionHandle};
 
 use crate::{observability::ObservabilityService, sessions::Session};
@@ -185,17 +185,17 @@ pub struct DriveClientBuilder {
 
 impl DriveClientBuilder {
     /// Builds a new DriveClient
-    pub fn new(session: Session) -> Self {
+    pub fn new(session: SessionHandle) -> Self {
         Self {
-            session: session.handle(),
+            session: session,
             observability: ObservabilityHandle::null(),
             request: ProtonDriveClientCreateRequest::default(),
         }
     }
 
     /// Sets the observability handle
-    pub fn with_observability(mut self, observability: ObservabilityService) -> Self {
-        self.observability = observability.handle();
+    pub fn with_observability(mut self, observability: ObservabilityHandle) -> Self {
+        self.observability = observability;
         self
     }
 
@@ -207,6 +207,10 @@ impl DriveClientBuilder {
 
     /// Builds it
     pub fn build(self) -> Result<DriveClient, DriveError> {
+        if self.request.client_id.is_none() {
+            error!("Unable to locate client id. Please add in a client id (just the name of your app)");
+            error!("May fail without it, carrying on...");
+        }
         DriveClient::new(self.session, self.observability, self.request)
     }
 }

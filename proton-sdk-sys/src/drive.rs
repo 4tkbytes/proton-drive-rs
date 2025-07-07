@@ -32,6 +32,8 @@ impl From<isize> for DriveClientHandle {
 
 /// Raw FFI functions for Drive client management
 pub mod raw {
+    use crate::data::AsyncCallback;
+
     use super::*;
     
     // int drive_client_create(
@@ -150,6 +152,270 @@ pub mod raw {
             
             free_client_fn(client_handle.raw());
             Ok(())
+        }
+    }
+
+    // int drive_client_get_volumes(
+    //     intptr_t client_handle,
+    //     ByteArray empty_request,
+    //     AsyncCallback callback
+    // );
+    /// Gets all volumes for the Drive client
+    /// 
+    /// # Parameters
+    /// * `client_handle` - Handle to the Drive client
+    /// * `empty_request` - Empty ByteArray (unused)
+    /// * `callback` - Async callback for the response
+    /// 
+    /// # Returns
+    /// Result code (0 = success, non-zero = error)
+    pub fn drive_client_get_volumes(
+        client_handle: DriveClientHandle,
+        empty_request: ByteArray,
+        callback: AsyncCallback,
+    ) -> anyhow::Result<i32> {
+        unsafe {
+            let sdk = ProtonSDKLib::instance()?;
+            
+            let get_volumes_fn: libloading::Symbol<unsafe extern "C" fn(
+                isize,
+                ByteArray,
+                AsyncCallback,
+            ) -> i32> = sdk.sdk_library.get(b"drive_client_get_volumes")?;
+            
+            let result = get_volumes_fn(client_handle.raw(), empty_request, callback);
+            Ok(result)
+        }
+    }
+
+    // int drive_client_get_share(
+    //     intptr_t client_handle,
+    //     ByteArray share_request, // ShareId
+    //     AsyncCallback callback
+    // );
+    /// Gets a specific share by ID
+    /// 
+    /// # Parameters
+    /// * `client_handle` - Handle to the Drive client
+    /// * `share_request` - ShareId as ByteArray
+    /// * `callback` - Async callback for the response
+    /// 
+    /// # Returns
+    /// Result code (0 = success, non-zero = error)
+    pub fn drive_client_get_share(
+        client_handle: DriveClientHandle,
+        share_request: ByteArray,
+        callback: AsyncCallback,
+    ) -> anyhow::Result<i32> {
+        unsafe {
+            let sdk = ProtonSDKLib::instance()?;
+            
+            let get_share_fn: libloading::Symbol<unsafe extern "C" fn(
+                isize,
+                ByteArray,
+                AsyncCallback,
+            ) -> i32> = sdk.sdk_library.get(b"drive_client_get_share")?;
+            
+            let result = get_share_fn(client_handle.raw(), share_request, callback);
+            Ok(result)
+        }
+    }
+
+    // int drive_client_get_folder_children(
+    //     intptr_t client_handle,
+    //     ByteArray folder_request, // FolderChildrenRequest
+    //     AsyncCallback callback
+    // );
+    /// Gets children of a folder
+    /// 
+    /// # Parameters
+    /// * `client_handle` - Handle to the Drive client
+    /// * `folder_request` - FolderChildrenRequest as ByteArray
+    /// * `callback` - Async callback for the response
+    /// 
+    /// # Returns
+    /// Result code (0 = success, non-zero = error)
+    pub fn drive_client_get_folder_children(
+        client_handle: DriveClientHandle,
+        folder_request: ByteArray,
+        callback: AsyncCallback,
+    ) -> anyhow::Result<i32> {
+        unsafe {
+            let sdk = ProtonSDKLib::instance()?;
+            
+            let get_children_fn: libloading::Symbol<unsafe extern "C" fn(
+                isize,
+                ByteArray,
+                AsyncCallback,
+            ) -> i32> = sdk.sdk_library.get(b"drive_client_get_folder_children")?;
+            
+            let result = get_children_fn(client_handle.raw(), folder_request, callback);
+            Ok(result)
+        }
+    }
+
+    // int drive_client_create_folder(
+    //     intptr_t client_handle,
+    //     ByteArray folder_request, // FolderCreationRequest
+    //     AsyncCallback callback
+    // );
+    /// Creates a new folder
+    /// 
+    /// # Parameters
+    /// * `client_handle` - Handle to the Drive client
+    /// * `folder_request` - FolderCreationRequest as ByteArray
+    /// * `callback` - Async callback for the response
+    /// 
+    /// # Returns
+    /// Result code (0 = success, non-zero = error)
+    pub fn drive_client_create_folder(
+        client_handle: DriveClientHandle,
+        folder_request: ByteArray,
+        callback: AsyncCallback,
+    ) -> anyhow::Result<i32> {
+        unsafe {
+            let sdk = ProtonSDKLib::instance()?;
+            
+            let create_folder_fn: libloading::Symbol<unsafe extern "C" fn(
+                isize,
+                ByteArray,
+                AsyncCallback,
+            ) -> i32> = sdk.sdk_library.get(b"drive_client_create_folder")?;
+            
+            let result = create_folder_fn(client_handle.raw(), folder_request, callback);
+            Ok(result)
+        }
+    }
+
+    // int drive_client_move_node(
+    //     intptr_t client_handle,
+    //     ByteArray move_request, // NodeMoveRequest
+    //     AsyncCallback callback
+    // );
+    /// Moves a node to a different location
+    /// 
+    /// # Parameters
+    /// * `client_handle` - Handle to the Drive client
+    /// * `move_request` - NodeMoveRequest as ByteArray
+    /// * `callback` - Async callback for the response
+    /// 
+    /// # Returns
+    /// Result code (0 = success, non-zero = error)
+    pub fn drive_client_move_node(
+        client_handle: DriveClientHandle,
+        move_request: ByteArray,
+        callback: AsyncCallback,
+    ) -> anyhow::Result<i32> {
+        unsafe {
+            let sdk = ProtonSDKLib::instance()?;
+            
+            let move_node_fn: libloading::Symbol<unsafe extern "C" fn(
+                isize,
+                ByteArray,
+                AsyncCallback,
+            ) -> i32> = sdk.sdk_library.get(b"drive_client_move_node")?;
+            
+            let result = move_node_fn(client_handle.raw(), move_request, callback);
+            Ok(result)
+        }
+    }
+
+    // int drive_client_delete_node(
+    //     intptr_t client_handle,
+    //     ByteArray delete_request, // NodeDeleteRequest
+    //     AsyncCallback callback
+    // );
+    /// Deletes a node (moves to trash)
+    /// 
+    /// # Parameters
+    /// * `client_handle` - Handle to the Drive client
+    /// * `delete_request` - NodeDeleteRequest as ByteArray
+    /// * `callback` - Async callback for the response
+    /// 
+    /// # Returns
+    /// Result code (0 = success, non-zero = error)
+    pub fn drive_client_delete_node(
+        client_handle: DriveClientHandle,
+        delete_request: ByteArray,
+        callback: AsyncCallback,
+    ) -> anyhow::Result<i32> {
+        unsafe {
+            let sdk = ProtonSDKLib::instance()?;
+            
+            let delete_node_fn: libloading::Symbol<unsafe extern "C" fn(
+                isize,
+                ByteArray,
+                AsyncCallback,
+            ) -> i32> = sdk.sdk_library.get(b"drive_client_delete_node")?;
+            
+            let result = delete_node_fn(client_handle.raw(), delete_request, callback);
+            Ok(result)
+        }
+    }
+
+    // int drive_client_rename_node(
+    //     intptr_t client_handle,
+    //     ByteArray rename_request, // NodeRenameRequest
+    //     AsyncCallback callback
+    // );
+    /// Renames a node
+    /// 
+    /// # Parameters
+    /// * `client_handle` - Handle to the Drive client
+    /// * `rename_request` - NodeRenameRequest as ByteArray
+    /// * `callback` - Async callback for the response
+    /// 
+    /// # Returns
+    /// Result code (0 = success, non-zero = error)
+    pub fn drive_client_rename_node(
+        client_handle: DriveClientHandle,
+        rename_request: ByteArray,
+        callback: AsyncCallback,
+    ) -> anyhow::Result<i32> {
+        unsafe {
+            let sdk = ProtonSDKLib::instance()?;
+            
+            let rename_node_fn: libloading::Symbol<unsafe extern "C" fn(
+                isize,
+                ByteArray,
+                AsyncCallback,
+            ) -> i32> = sdk.sdk_library.get(b"drive_client_rename_node")?;
+            
+            let result = rename_node_fn(client_handle.raw(), rename_request, callback);
+            Ok(result)
+        }
+    }
+
+    // int drive_client_get_node_info(
+    //     intptr_t client_handle,
+    //     ByteArray node_request, // NodeIdentity
+    //     AsyncCallback callback
+    // );
+    /// Gets detailed information about a node
+    /// 
+    /// # Parameters
+    /// * `client_handle` - Handle to the Drive client
+    /// * `node_request` - NodeIdentity as ByteArray
+    /// * `callback` - Async callback for the response
+    /// 
+    /// # Returns
+    /// Result code (0 = success, non-zero = error)
+    pub fn drive_client_get_node_info(
+        client_handle: DriveClientHandle,
+        node_request: ByteArray,
+        callback: AsyncCallback,
+    ) -> anyhow::Result<i32> {
+        unsafe {
+            let sdk = ProtonSDKLib::instance()?;
+            
+            let get_node_info_fn: libloading::Symbol<unsafe extern "C" fn(
+                isize,
+                ByteArray,
+                AsyncCallback,
+            ) -> i32> = sdk.sdk_library.get(b"drive_client_get_node_info")?;
+            
+            let result = get_node_info_fn(client_handle.raw(), node_request, callback);
+            Ok(result)
         }
     }
 }

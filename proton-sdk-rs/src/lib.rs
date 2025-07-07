@@ -1,3 +1,4 @@
+pub mod downloads;
 pub mod observability;
 pub mod sessions;
 pub mod drive;
