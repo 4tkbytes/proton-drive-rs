@@ -14,17 +14,16 @@ impl CancellationToken {
         })
     }
 
-    
     /// Fetches the handle
     pub fn handle(&self) -> CancellationTokenHandle {
         self.handle
     }
-    
+
     /// Cancels all operations associated with this token
     pub fn cancel(&self) -> anyhow::Result<()> {
         raw::cancel(self.handle.raw())
     }
-    
+
     /// Free the cancellation token source
     pub fn free(self) -> anyhow::Result<()> {
         let result = raw::free(self.handle.raw());
@@ -57,5 +56,4 @@ impl Clone for CancellationToken {
 }
 
 #[cfg(test)]
-mod tests {
-}
+mod tests {}

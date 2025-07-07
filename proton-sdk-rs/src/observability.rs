@@ -1,7 +1,11 @@
 use std::{ffi::c_void, fmt};
 
 use log::{debug, warn};
-use proton_sdk_sys::{data::{AsyncCallback, ByteArray}, observability::{self, ObservabilityHandle}, sessions::SessionHandle};
+use proton_sdk_sys::{
+    data::{AsyncCallback, ByteArray},
+    observability::{self, ObservabilityHandle},
+    sessions::SessionHandle,
+};
 
 use crate::cancellation::CancellationToken;
 
@@ -29,15 +33,15 @@ pub enum ObservabilityError {
 /// Service that sends basic telemetry from Proton Drive and Proton Accounts
 pub struct ObservabilityService {
     handle: ObservabilityHandle,
-    _session: SessionHandle
+    _session: SessionHandle,
 }
 
 impl ObservabilityService {
     /// Creates a new observability service for the given session
-    /// 
+    ///
     /// # Arguments
     /// * `session` - The active session handle
-    /// 
+    ///
     /// # Returns
     /// A new ObservabilityService instance or an error if creation failed
     pub fn new(session: SessionHandle) -> Result<Self, ObservabilityError> {
@@ -56,7 +60,10 @@ impl ObservabilityService {
             return Err(ObservabilityError::NullHandle);
         }
 
-        log::debug!("Observability service started with handle: {:?}", obs_handle);
+        log::debug!(
+            "Observability service started with handle: {:?}",
+            obs_handle
+        );
 
         Ok(Self {
             handle: obs_handle,
@@ -73,15 +80,18 @@ impl ObservabilityService {
     }
 
     /// Flushes observability data asynchronously
-    /// 
+    ///
     /// This sends any pending telemetry data to Proton's servers.
-    /// 
+    ///
     /// # Arguments
     /// * `cancellation_token` - Token to cancel the operation if needed
-    /// 
+    ///
     /// # Returns
     /// Ok(()) on success, or an error if the flush failed
-    pub async fn flush(&self, cancellation_token: &CancellationToken) -> Result<(), ObservabilityError> {
+    pub async fn flush(
+        &self,
+        cancellation_token: &CancellationToken,
+    ) -> Result<(), ObservabilityError> {
         if self.handle.is_null() {
             return Err(ObservabilityError::NullHandle);
         }
@@ -93,7 +103,8 @@ impl ObservabilityService {
             log::debug!("Flush success callback hit!");
             if !state.is_null() {
                 unsafe {
-                    let tx_ptr = state as *mut tokio::sync::oneshot::Sender<Result<(), ObservabilityError>>;
+                    let tx_ptr =
+                        state as *mut tokio::sync::oneshot::Sender<Result<(), ObservabilityError>>;
                     let tx = Box::from_raw(tx_ptr);
                     let _ = tx.send(Ok(()));
                 }
@@ -104,16 +115,17 @@ impl ObservabilityService {
             log::debug!("Flush failure callback hit...");
             if !state.is_null() {
                 unsafe {
-                    let tx_ptr = state as *mut tokio::sync::oneshot::Sender<Result<(), ObservabilityError>>;
+                    let tx_ptr =
+                        state as *mut tokio::sync::oneshot::Sender<Result<(), ObservabilityError>>;
                     let tx = Box::from_raw(tx_ptr);
-                    
+
                     let error_slice = error_data.as_slice();
                     let error_msg = if error_slice.is_empty() {
                         "Unknown flush error".to_string()
                     } else {
                         String::from_utf8_lossy(error_slice).to_string()
                     };
-                    
+
                     let _ = tx.send(Err(ObservabilityError::FlushFailed(error_msg)));
                 }
             }
@@ -123,15 +135,20 @@ impl ObservabilityService {
             tx_ptr as *mut _ as *const std::ffi::c_void,
             Some(flush_success_callback),
             Some(flush_failure_callback),
-            cancellation_token.handle().raw()
+            cancellation_token.handle().raw(),
         );
 
         let result = observability::raw::observability_service_flush(self.handle, async_callback)
             .map_err(|e| ObservabilityError::SdkError(e))?;
 
         if result != 0 {
-            unsafe { let _ = Box::from_raw(tx_ptr); }
-            return Err(ObservabilityError::FlushFailed(format!("FFI call failed with code: {}", result)));
+            unsafe {
+                let _ = Box::from_raw(tx_ptr);
+            }
+            return Err(ObservabilityError::FlushFailed(format!(
+                "FFI call failed with code: {}",
+                result
+            )));
         }
 
         match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
@@ -141,7 +158,7 @@ impl ObservabilityService {
     }
 
     /// Explicitly frees the observability service
-    /// 
+    ///
     /// Note: This is automatically called when the ObservabilityService is dropped,
     /// so you usually don't need to call this manually.
     pub fn free(self) -> Result<(), ObservabilityError> {
@@ -192,8 +209,8 @@ impl ObservabilityServiceBuilder {
 }
 
 /// A wrapper to the ObservabilityService struct
-/// 
-/// This struct allows you to enable or disable telemetry for Proton Services. 
+///
+/// This struct allows you to enable or disable telemetry for Proton Services.
 pub struct OptionalObservability(Option<ObservabilityService>);
 
 impl OptionalObservability {
@@ -209,7 +226,8 @@ impl OptionalObservability {
 
     /// Gets the handle if observability is enabled, otherwise returns null handle
     pub fn handle(&self) -> ObservabilityHandle {
-        self.0.as_ref()
+        self.0
+            .as_ref()
             .map(|obs| obs.handle())
             .unwrap_or_else(ObservabilityHandle::null)
     }
@@ -220,7 +238,10 @@ impl OptionalObservability {
     }
 
     /// Flushes data if observability is enabled
-    pub async fn flush_if_enabled(&self, cancellation_token: &CancellationToken) -> Result<(), ObservabilityError> {
+    pub async fn flush_if_enabled(
+        &self,
+        cancellation_token: &CancellationToken,
+    ) -> Result<(), ObservabilityError> {
         if let Some(obs) = &self.0 {
             obs.flush(cancellation_token).await
         } else {
@@ -233,7 +254,10 @@ impl fmt::Debug for OptionalObservability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
             Some(obs) => f.debug_tuple("OptionalObservability").field(obs).finish(),
-            None => f.debug_tuple("OptionalObservability").field(&"Disabled").finish(),
+            None => f
+                .debug_tuple("OptionalObservability")
+                .field(&"Disabled")
+                .finish(),
         }
     }
 }

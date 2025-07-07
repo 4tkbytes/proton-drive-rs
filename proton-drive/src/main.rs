@@ -1,6 +1,14 @@
-use std::{env, io::{self, Write}};
 use log::*;
-use proton_sdk_rs::{drive::DriveClientBuilder, observability::OptionalObservability, sessions::{SessionBuilder, SessionPlatform}, AddressKeyRegistrationRequest, ClientId, ProtonDriveClientCreateRequest};
+use proton_sdk_rs::{
+    AddressKeyRegistrationRequest, ClientId, ProtonDriveClientCreateRequest,
+    drive::DriveClientBuilder,
+    observability::OptionalObservability,
+    sessions::{SessionBuilder, SessionPlatform},
+};
+use std::{
+    env,
+    io::{self, Write},
+};
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -19,11 +27,17 @@ async fn main() -> Result<(), anyhow::Error> {
         warn!("No RUST_LOG environment variable found. Setting default log level.");
     }
 
-    let username = env::var("PROTON_USERNAME").expect("You must provide a username in the .env file");
-    let password = env::var("PROTON_PASSWORD").expect("You must provide a password in the .env file");
+    let username =
+        env::var("PROTON_USERNAME").expect("You must provide a username in the .env file");
+    let password =
+        env::var("PROTON_PASSWORD").expect("You must provide a password in the .env file");
 
     debug!("Creating session for user: {}", username);
-    debug!("Using credentials: username={}, password={}chars", username, password.len());
+    debug!(
+        "Using credentials: username={}, password={}chars",
+        username,
+        password.len()
+    );
 
     let session_result = SessionBuilder::new(username, password)
         // .with_app_version(SessionPlatform::Windows, "proton-drive-rs", "1.0.0")
@@ -61,27 +75,29 @@ async fn main() -> Result<(), anyhow::Error> {
             info!("Session created successfully!");
             debug!("Session handle: {:?}", session.handle());
             session
-        },
+        }
         Err(e) => {
             println!("Failed to create session: {}", e);
-            
+
             match e {
                 proton_sdk_rs::sessions::SessionError::SdkError(sdk_err) => {
                     error!("SDK Error Details: {}", sdk_err);
-                },
+                }
                 proton_sdk_rs::sessions::SessionError::OperationFailed(code) => {
                     error!("SDK operation failed with code: {}", code);
                     match code {
-                        -1 => error!("   Possible causes: Invalid credentials, network issues, or SDK not initialized"),
+                        -1 => error!(
+                            "   Possible causes: Invalid credentials, network issues, or SDK not initialized"
+                        ),
                         401 => println!("   Authentication failed - check username/password"),
                         403 => println!("   Access forbidden - account may be locked or suspended"),
                         422 => println!("   Invalid request format"),
                         _ => println!("   Unknown error code: {}", code),
                     }
-                },
+                }
                 proton_sdk_rs::sessions::SessionError::ProtobufError(proto_err) => {
                     error!("Protobuf Error: {}", proto_err);
-                },
+                }
                 _ => {
                     error!("Other error: {}", e);
                 }
@@ -98,21 +114,21 @@ async fn main() -> Result<(), anyhow::Error> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let create_request = ProtonDriveClientCreateRequest {
         client_id: Some(ClientId {
-            value: "proton-sdk-rs".to_string()
-        })
+            value: "proton-sdk-rs".to_string(),
+        }),
     };
     info!("Request: {:?}", create_request);
 
     let drive_client = match DriveClientBuilder::new(session.handle())
         .with_observability(obs.handle())
         .with_request(create_request)
-        .build() 
+        .build()
     {
         Ok(cli) => {
             info!("Drive client created {:?}", cli.handle());
             cli
-        },
-        Err(e) => anyhow::bail!(e) 
+        }
+        Err(e) => anyhow::bail!(e),
     };
 
     Ok(())

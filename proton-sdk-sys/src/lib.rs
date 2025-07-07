@@ -1,17 +1,20 @@
-pub mod protobufs;
-pub mod logger;
-pub mod uploader;
-pub mod downloads;
-pub mod observability;
-pub mod nodes;
-pub mod sessions;
 pub mod cancellation;
-pub mod drive;
 pub mod data;
+pub mod downloads;
+pub mod drive;
+pub mod logger;
+pub mod nodes;
+pub mod observability;
+pub mod protobufs;
+pub mod sessions;
+pub mod uploader;
 
 use libloading::Library;
 use log::{debug, error, warn};
-use std::{path::PathBuf, sync::{Mutex, Once}};
+use std::{
+    path::PathBuf,
+    sync::{Mutex, Once},
+};
 
 pub struct ProtonSDKLib {
     pub sdk_library: Library,
@@ -24,14 +27,12 @@ static mut PROTON_SDK_INSTANCE: Option<ProtonSDKLib> = None;
 impl ProtonSDKLib {
     pub fn instance() -> anyhow::Result<&'static Self> {
         unsafe {
-            INIT.call_once(|| {
-                match Self::load_internal() {
-                    Ok(instance) => {
-                        PROTON_SDK_INSTANCE = Some(instance);
-                    }
-                    Err(e) => {
-                        error!("Failed to initialise ProtonSDKLib: {}", e);
-                    }
+            INIT.call_once(|| match Self::load_internal() {
+                Ok(instance) => {
+                    PROTON_SDK_INSTANCE = Some(instance);
+                }
+                Err(e) => {
+                    error!("Failed to initialise ProtonSDKLib: {}", e);
                 }
             });
 
@@ -56,28 +57,39 @@ impl ProtonSDKLib {
     unsafe fn call_sdk_lib() -> Result<(Library, PathBuf), libloading::Error> {
         let (_runtime_id, lib_name) = Self::get_platform_info();
         let library_path = PathBuf::from(lib_name);
-        
+
         match Library::new(&library_path) {
             Ok(lib) => {
                 debug!("Loaded SDK library from: {}", library_path.display());
                 Ok((lib, library_path))
-            },
+            }
             Err(e) => {
-                warn!("Failed to load library from {}: {}", library_path.display(), e);
-                
+                warn!(
+                    "Failed to load library from {}: {}",
+                    library_path.display(),
+                    e
+                );
+
                 // Try fallback paths
                 for fallback_path in Self::get_fallback_paths() {
                     match Library::new(&fallback_path) {
                         Ok(lib) => {
-                            debug!("Loaded SDK library from fallback: {}", fallback_path.display());
+                            debug!(
+                                "Loaded SDK library from fallback: {}",
+                                fallback_path.display()
+                            );
                             return Ok((lib, fallback_path));
-                        },
+                        }
                         Err(fallback_err) => {
-                            warn!("Fallback failed for {}: {}", fallback_path.display(), fallback_err);
+                            warn!(
+                                "Fallback failed for {}: {}",
+                                fallback_path.display(),
+                                fallback_err
+                            );
                         }
                     }
                 }
-                
+
                 Err(e)
             }
         }
@@ -90,11 +102,14 @@ impl ProtonSDKLib {
                 "x86_64" => "win-x64",
                 "x86" => "win-x86",
                 "aarch64" => "win-arm64",
-                _ => panic!("Unsupported Windows architecture: {}", std::env::consts::ARCH),
+                _ => panic!(
+                    "Unsupported Windows architecture: {}",
+                    std::env::consts::ARCH
+                ),
             };
             (runtime_id, "proton_drive_sdk.dll")
         }
-        
+
         #[cfg(target_os = "linux")]
         {
             let runtime_id = match std::env::consts::ARCH {
@@ -106,7 +121,7 @@ impl ProtonSDKLib {
             };
             (runtime_id, "libproton_drive_sdk.so")
         }
-        
+
         #[cfg(target_os = "macos")]
         {
             let runtime_id = match std::env::consts::ARCH {
@@ -116,7 +131,7 @@ impl ProtonSDKLib {
             };
             (runtime_id, "libproton_drive_sdk.dylib")
         }
-        
+
         #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
         {
             panic!("Unsupported operating system: {}", std::env::consts::OS);
@@ -124,18 +139,18 @@ impl ProtonSDKLib {
     }
 
     fn get_fallback_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    let (_runtime_id, lib_name) = Self::get_platform_info();
-    
-    paths.push(PathBuf::from(format!("./{}", lib_name)));
-    paths.push(PathBuf::from(format!("./libs/{}", lib_name)));
-    paths.push(PathBuf::from(format!("../libs/{}", lib_name)));
-    
-    paths.push(PathBuf::from(format!("target/debug/{}", lib_name)));
-    paths.push(PathBuf::from(format!("target/release/{}", lib_name)));
-    paths.push(PathBuf::from(format!("../target/debug/{}", lib_name)));
-    paths.push(PathBuf::from(format!("../target/release/{}", lib_name)));
-    
-    paths
-}
+        let mut paths = Vec::new();
+        let (_runtime_id, lib_name) = Self::get_platform_info();
+
+        paths.push(PathBuf::from(format!("./{}", lib_name)));
+        paths.push(PathBuf::from(format!("./libs/{}", lib_name)));
+        paths.push(PathBuf::from(format!("../libs/{}", lib_name)));
+
+        paths.push(PathBuf::from(format!("target/debug/{}", lib_name)));
+        paths.push(PathBuf::from(format!("target/release/{}", lib_name)));
+        paths.push(PathBuf::from(format!("../target/debug/{}", lib_name)));
+        paths.push(PathBuf::from(format!("../target/release/{}", lib_name)));
+
+        paths
+    }
 }

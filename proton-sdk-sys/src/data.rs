@@ -3,8 +3,8 @@ use std::os::raw::c_void;
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct ByteArray {
-	pub pointer: *const u8,
-    pub length: usize
+    pub pointer: *const u8,
+    pub length: usize,
 }
 
 impl ByteArray {
@@ -85,10 +85,7 @@ impl Callback {
         state: *const c_void,
         callback: Option<extern "C" fn(*const c_void, ByteArray)>,
     ) -> Self {
-        Self {
-            state,
-            callback,
-        }
+        Self { state, callback }
     }
 
     /// Empty instance of callback
@@ -108,10 +105,7 @@ pub struct AsyncCallbackWithProgress {
 
 impl AsyncCallbackWithProgress {
     /// Create a new AsyncCallbackWithProgress
-    pub fn new(
-        async_callback: AsyncCallback,
-        progress_callback: Callback,
-    ) -> Self {
+    pub fn new(async_callback: AsyncCallback, progress_callback: Callback) -> Self {
         Self {
             async_callback,
             progress_callback,
@@ -139,10 +133,7 @@ impl BooleanCallback {
         state: *const c_void,
         callback: Option<extern "C" fn(*const c_void, ByteArray) -> bool>,
     ) -> Self {
-        Self {
-            state,
-            callback,
-        }
+        Self { state, callback }
     }
 
     /// Create an empty BooleanCallback

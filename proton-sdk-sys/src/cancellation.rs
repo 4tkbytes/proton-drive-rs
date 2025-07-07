@@ -9,12 +9,12 @@ impl CancellationTokenHandle {
     pub fn null() -> Self {
         Self(0)
     }
-    
+
     /// Checks if the handle is null/invalid
     pub fn is_null(&self) -> bool {
         self.0 == 0
     }
-    
+
     /// Gets the raw isize value for FFI
     pub fn raw(&self) -> isize {
         self.0
@@ -34,25 +34,27 @@ impl From<isize> for CancellationTokenHandle {
 
 pub mod raw {
     use super::*;
-    
+
     /// Creates a cancellation token source (raw FFI)
     pub fn create() -> anyhow::Result<isize> {
         unsafe {
             let sdk = ProtonSDKLib::instance()?;
-            
-            let create_fn: libloading::Symbol<unsafe extern "C" fn() -> isize> = 
+
+            let create_fn: libloading::Symbol<unsafe extern "C" fn() -> isize> =
                 sdk.sdk_library.get(b"cancellation_token_source_create")?;
-            
+
             let handle = create_fn();
-            
+
             if handle == 0 {
-                return Err(anyhow::anyhow!("Failed to create cancellation token source"));
+                return Err(anyhow::anyhow!(
+                    "Failed to create cancellation token source"
+                ));
             }
-            
+
             Ok(handle)
         }
     }
-    
+
     /// Cancels a cancellation token source (raw FFI)
     /// Note: Does nothing if handle is CancellationToken::NONE
     pub fn cancel(handle: isize) -> anyhow::Result<()> {
@@ -60,18 +62,18 @@ pub mod raw {
         if handle == -1 {
             return Ok(());
         }
-        
+
         unsafe {
             let sdk = ProtonSDKLib::instance()?;
-            
-            let cancel_fn: libloading::Symbol<unsafe extern "C" fn(isize)> = 
+
+            let cancel_fn: libloading::Symbol<unsafe extern "C" fn(isize)> =
                 sdk.sdk_library.get(b"cancellation_token_source_cancel")?;
-            
+
             cancel_fn(handle);
             Ok(())
         }
     }
-    
+
     /// Frees a cancellation token source (raw FFI)
     /// Note: Does nothing if handle is CancellationToken::NONE
     pub fn free(handle: isize) -> anyhow::Result<()> {
@@ -79,13 +81,13 @@ pub mod raw {
         if handle == -1 {
             return Ok(());
         }
-        
+
         unsafe {
             let sdk = ProtonSDKLib::instance()?;
-            
-            let free_fn: libloading::Symbol<unsafe extern "C" fn(isize)> = 
+
+            let free_fn: libloading::Symbol<unsafe extern "C" fn(isize)> =
                 sdk.sdk_library.get(b"cancellation_token_source_free")?;
-            
+
             free_fn(handle);
             Ok(())
         }

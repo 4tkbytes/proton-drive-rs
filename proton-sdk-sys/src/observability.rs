@@ -25,18 +25,23 @@ impl From<isize> for ObservabilityHandle {
 }
 
 pub mod raw {
-    use crate::{data::{AsyncCallback, ByteArray}, observability::ObservabilityHandle, sessions::SessionHandle, ProtonSDKLib};
     use super::*;
+    use crate::{
+        data::{AsyncCallback, ByteArray},
+        observability::ObservabilityHandle,
+        sessions::SessionHandle,
+        ProtonSDKLib,
+    };
 
     // int observability_service_start_new(
     //     intptr_t session_handle,
     //     intptr_t* out_observability_handle
     // );
     /// Starts a new observability service
-    /// 
+    ///
     /// # Parameters
     /// * `session_handle` - Handle to the active session
-    /// 
+    ///
     /// # Returns
     /// (Result code, Observability handle) - code 0 = success, handle for the observability service
     pub fn observability_service_start_new(
@@ -45,17 +50,13 @@ pub mod raw {
         unsafe {
             let sdk = ProtonSDKLib::instance()?;
 
-            let observability_start_fn: libloading::Symbol<unsafe extern "C" fn(
-                isize,
-                *mut isize,
-            ) -> i32> = sdk.sdk_library.get(b"observability_service_start_new")?;
-            
+            let observability_start_fn: libloading::Symbol<
+                unsafe extern "C" fn(isize, *mut isize) -> i32,
+            > = sdk.sdk_library.get(b"observability_service_start_new")?;
+
             let mut observability_handle: isize = 0;
-            let result = observability_start_fn(
-                session_handle.raw(),
-                &mut observability_handle,
-            );
-            
+            let result = observability_start_fn(session_handle.raw(), &mut observability_handle);
+
             Ok((result, ObservabilityHandle::from(observability_handle)))
         }
     }
@@ -69,11 +70,11 @@ pub mod raw {
     //     intptr_t* out_observability_handle
     // );
     /// Flushes observability data
-    /// 
+    ///
     /// # Parameters
     /// * `observability_handle` - Handle to the observability service
     /// * `callback` - Async callback for completion
-    /// 
+    ///
     /// # Returns
     /// Result code (0 = success, non-zero = error)
     pub fn observability_service_flush(
@@ -83,20 +84,18 @@ pub mod raw {
         unsafe {
             let sdk = ProtonSDKLib::instance()?;
 
-            let flush_fn: libloading::Symbol<unsafe extern "C" fn(
-                isize,
-                AsyncCallback,
-            ) -> i32> = sdk.sdk_library.get(b"observability_service_flush")?;
-            
+            let flush_fn: libloading::Symbol<unsafe extern "C" fn(isize, AsyncCallback) -> i32> =
+                sdk.sdk_library.get(b"observability_service_flush")?;
+
             let result = flush_fn(observability_handle.raw(), callback);
-            
+
             Ok(result)
         }
     }
 
     // int observability_service_free(intptr_t observability_handle);
     /// Frees observability service resources
-    /// 
+    ///
     /// # Parameters
     /// * `observability_handle` - Handle to the observability service to free
     pub fn observability_service_free(
@@ -105,9 +104,9 @@ pub mod raw {
         unsafe {
             let sdk = ProtonSDKLib::instance()?;
 
-            let free_fn: libloading::Symbol<unsafe extern "C" fn(isize)> = 
+            let free_fn: libloading::Symbol<unsafe extern "C" fn(isize)> =
                 sdk.sdk_library.get(b"observability_service_free")?;
-            
+
             free_fn(observability_handle.raw());
             Ok(())
         }
@@ -115,5 +114,4 @@ pub mod raw {
 }
 
 #[cfg(test)]
-mod tests {
-}
+mod tests {}
