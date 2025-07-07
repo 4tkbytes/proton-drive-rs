@@ -87,11 +87,22 @@ jobs:
     - name: Verify build output
       shell: bash
       run: |
+        # The build.py script creates native-libs in the same directory as build.py
+        # Since we're in the proton-sdk-rs directory, check there
         if [ -d "native-libs/${{ matrix.runtime }}" ]; then
           echo "✅ Build successful for ${{ matrix.runtime }}"
           ls -la native-libs/${{ matrix.runtime }}/
         else
           echo "❌ Build failed - no output directory found"
+          echo "Current directory structure:"
+          ls -la
+          echo "Looking for: native-libs/${{ matrix.runtime }}"
+          if [ -d "native-libs" ]; then
+            echo "native-libs directory contents:"
+            ls -la native-libs/
+          else
+            echo "native-libs directory does not exist"
+          fi
           exit 1
         fi
 

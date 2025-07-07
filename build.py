@@ -923,7 +923,7 @@ class BuildScript:
         else:
             runtime_id = f"{self.os_name}-{dotnet_arch}"
             lib_extension = ".so"  # fallback
-    
+
         # Check if Proton.SDK exists
         sdk_dir = self.base_dir / "Proton.SDK"
         if not sdk_dir.exists():
@@ -976,12 +976,14 @@ class BuildScript:
             print(f"{Colors.RED}Error: No AOT output found{Colors.END}")
             return
         
-        # Create native-libs directory in the same directory as the build script
-        build_script_dir = Path(__file__).parent
-        native_libs_dir = build_script_dir / "native-libs" / runtime_id
+        # Create native-libs directory relative to the current working directory
+        # This ensures consistency between local and CI environments
+        current_dir = Path.cwd()
+        native_libs_dir = current_dir / "native-libs" / runtime_id
         native_libs_dir.mkdir(parents=True, exist_ok=True)
         
         print(f"{Colors.CYAN}Creating native-libs at: {native_libs_dir}{Colors.END}")
+        print(f"{Colors.CYAN}Current working directory: {current_dir}{Colors.END}")
         
         # Copy library files (excluding .pdb files)
         copied_files = []
