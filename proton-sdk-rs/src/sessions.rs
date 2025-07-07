@@ -198,6 +198,13 @@ impl SessionBuilder {
         self
     }
 
+    pub fn with_rclone_app_version_spoof(mut self) -> Self {
+        if let Some(ref mut options) = self.request.options {
+            options.app_version = "macos-drive@1.0.0-alpha.1+rclone".to_string();
+        }
+        self
+    }
+
     /// Sets request/response callback
     pub fn with_request_response_callback<F>(mut self, callback: F) -> Self
     where

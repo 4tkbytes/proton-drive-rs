@@ -55,27 +55,33 @@ impl ProtonSDKLib {
     }
 
     unsafe fn call_sdk_lib() -> Result<(Library, PathBuf), libloading::Error> {
-        let library_path = Self::get_library_path();
+        let (_runtime_id, lib_name) = Self::get_platform_info();
+        let library_path = PathBuf::from(lib_name);
         
         match Library::new(&library_path) {
-            Ok(lib) => Ok((lib, library_path)),
+            Ok(lib) => {
+                println!("✅ Loaded SDK library from: {}", library_path.display());
+                Ok((lib, library_path))
+            },
             Err(e) => {
-                eprintln!("Failed to load library from {}: {}", library_path.display(), e);
+                eprintln!("❌ Failed to load library from {}: {}", library_path.display(), e);
                 
+                // Try fallback paths
                 for fallback_path in Self::get_fallback_paths() {
-                    if let Ok(lib) = Library::new(&fallback_path) {
-                        return Ok((lib, fallback_path));
+                    match Library::new(&fallback_path) {
+                        Ok(lib) => {
+                            println!("✅ Loaded SDK library from fallback: {}", fallback_path.display());
+                            return Ok((lib, fallback_path));
+                        },
+                        Err(fallback_err) => {
+                            eprintln!("⚠️  Fallback failed for {}: {}", fallback_path.display(), fallback_err);
+                        }
                     }
                 }
                 
                 Err(e)
             }
         }
-    }
-
-    fn get_library_path() -> PathBuf {
-        let (runtime_id, lib_name) = Self::get_platform_info();
-        PathBuf::from(format!("native-libs/{}/publish/{}", runtime_id, lib_name))
     }
 
     fn get_platform_info() -> (&'static str, &'static str) {
@@ -119,27 +125,20 @@ impl ProtonSDKLib {
     }
 
     fn get_fallback_paths() -> Vec<PathBuf> {
-        let mut paths = Vec::new();
-        let (runtime_id, lib_name) = Self::get_platform_info();
-        
-        paths.push(PathBuf::from(format!("native-libs/{}/{}", runtime_id, lib_name)));
-        
-        paths.push(PathBuf::from(lib_name));
-        
-        paths.push(PathBuf::from(format!("libs/{}", lib_name)));
-        
-        #[cfg(target_os = "linux")]
-        {
-            paths.push(PathBuf::from(format!("/usr/local/lib/{}", lib_name)));
-            paths.push(PathBuf::from(format!("/usr/lib/{}", lib_name)));
-        }
-        
-        #[cfg(target_os = "macos")]
-        {
-            paths.push(PathBuf::from(format!("/usr/local/lib/{}", lib_name)));
-            paths.push(PathBuf::from(format!("/opt/homebrew/lib/{}", lib_name)));
-        }
-        
-        paths
-    }
+    let mut paths = Vec::new();
+    let (_runtime_id, lib_name) = Self::get_platform_info();
+    
+    // Simple fallback paths - start with current directory variations
+    paths.push(PathBuf::from(format!("./{}", lib_name)));
+    paths.push(PathBuf::from(format!("./libs/{}", lib_name)));
+    paths.push(PathBuf::from(format!("../libs/{}", lib_name)));
+    
+    // Try target directories (where cargo puts executables)
+    paths.push(PathBuf::from(format!("target/debug/{}", lib_name)));
+    paths.push(PathBuf::from(format!("target/release/{}", lib_name)));
+    paths.push(PathBuf::from(format!("../target/debug/{}", lib_name)));
+    paths.push(PathBuf::from(format!("../target/release/{}", lib_name)));
+    
+    paths
+}
 }
