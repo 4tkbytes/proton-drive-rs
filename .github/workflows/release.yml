@@ -1,0 +1,247 @@
+name: Build and Release Native Libraries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+env:
+  DOTNET_VERSION: '9.0.x'
+  RUST_VERSION: 'stable'
+
+jobs:
+  build-libraries:
+    name: Build Native Libraries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            runtime: win-x64
+            arch: amd64
+          - os: windows-latest
+            runtime: win-arm64
+            arch: arm64
+          - os: ubuntu-latest
+            runtime: linux-x64
+            arch: amd64
+          - os: ubuntu-latest
+            runtime: linux-arm64
+            arch: arm64
+          - os: macos-latest
+            runtime: osx-x64
+            arch: amd64
+          - os: macos-latest
+            runtime: osx-arm64
+            arch: arm64
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch full history for proper git operations
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ env.RUST_VERSION }}
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Install Linux dependencies
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu gcc-multilib
+        # Set up cross-compilation for ARM64 if needed
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+        fi
+
+    - name: Clone dependencies
+      run: python build.py --step clone --arch ${{ matrix.arch }}
+
+    - name: Build native library
+      run: python build.py --step dll --arch ${{ matrix.arch }}
+
+    - name: Verify build output
+      shell: bash
+      run: |
+        if [ -d "native-libs/${{ matrix.runtime }}" ]; then
+          echo "✅ Build successful for ${{ matrix.runtime }}"
+          ls -la native-libs/${{ matrix.runtime }}/
+        else
+          echo "❌ Build failed - no output directory found"
+          exit 1
+        fi
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: native-libs-${{ matrix.runtime }}
+        path: native-libs/${{ matrix.runtime }}/
+        retention-days: 1
+
+  create-release:
+    name: Create Release
+    needs: build-libraries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
+
+    - name: Organize release assets
+      run: |
+        mkdir -p release-assets
+        
+        # Create individual platform archives
+        for runtime_dir in artifacts/native-libs-*; do
+          if [ -d "$runtime_dir" ]; then
+            runtime=$(basename "$runtime_dir" | sed 's/native-libs-//')
+            echo "Processing $runtime..."
+            
+            cd "$runtime_dir"
+            
+            # Create platform-specific archive
+            if [[ "$runtime" == win-* ]]; then
+              zip -r "../../release-assets/proton-sdk-native-$runtime.zip" .
+            else
+              tar -czf "../../release-assets/proton-sdk-native-$runtime.tar.gz" .
+            fi
+            
+            cd - > /dev/null
+          fi
+        done
+        
+        # Create combined archive with all platforms
+        cd artifacts/
+        tar -czf "../release-assets/proton-sdk-native-all-platforms.tar.gz" native-libs-*/
+        cd - > /dev/null
+        
+        echo "Release assets created:"
+        ls -la release-assets/
+
+    - name: Get release tag
+      id: get_tag
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+        else
+          echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Prepare release notes
+      id: release_notes
+      run: |
+        if [ -f "RELEASE.md" ]; then
+          echo "📄 Using release notes from RELEASE.md"
+          cp RELEASE.md release_notes.md
+          
+          # Add build information at the end
+          cat >> release_notes.md << 'EOF'
+          
+          ---
+          
+          ## 📦 Available Platforms
+          
+          - **Windows**: `win-x64`, `win-arm64`
+          - **Linux**: `linux-x64`, `linux-arm64`
+          - **macOS**: `osx-x64`, `osx-arm64`
+          
+          ## 📁 Archive Contents
+          
+          - Individual platform archives: `proton-sdk-native-{platform}.{zip|tar.gz}`
+          - Combined archive: `proton-sdk-native-all-platforms.tar.gz`
+          
+          **Built with:**
+          - .NET ${{ env.DOTNET_VERSION }}
+          - Rust ${{ env.RUST_VERSION }}
+          - AOT compilation enabled for optimal performance
+        EOF
+        else
+          echo "📝 Generating default release notes (RELEASE.md not found)"
+          cat > release_notes.md << 'EOF'
+        # Proton SDK Native Libraries ${{ steps.get_tag.outputs.tag }}
+        
+        This release contains pre-built native libraries for the Proton SDK.
+        
+        ## 📦 Available Platforms
+        
+        - **Windows**: `win-x64`, `win-arm64`
+        - **Linux**: `linux-x64`, `linux-arm64`
+        - **macOS**: `osx-x64`, `osx-arm64`
+        
+        ## 📋 What's Included
+        
+        Each platform archive contains:
+        - AOT-compiled .NET native library
+        - Required runtime dependencies
+        - Platform-specific bindings
+        
+        ## 🚀 Usage
+        
+        1. Download the appropriate archive for your platform
+        2. Extract to your project's native libraries directory
+        3. Reference the library in your Rust project via `proton-sdk-sys`
+        
+        ## 📁 Archive Contents
+        
+        - Individual platform archives: `proton-sdk-native-{platform}.{zip|tar.gz}`
+        - Combined archive: `proton-sdk-native-all-platforms.tar.gz`
+        
+        ---
+        
+        **Built with:**
+        - .NET ${{ env.DOTNET_VERSION }}
+        - Rust ${{ env.RUST_VERSION }}
+        - AOT compilation enabled for optimal performance
+        EOF
+        fi
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.get_tag.outputs.tag }}
+        name: Proton SDK Native Libraries ${{ steps.get_tag.outputs.tag }}
+        body_path: release_notes.md
+        files: release-assets/*
+        draft: false
+        prerelease: ${{ contains(steps.get_tag.outputs.tag, '-') }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Release Summary
+      run: |
+        echo "🎉 Release ${{ steps.get_tag.outputs.tag }} created successfully!"
+        echo "📦 Assets uploaded:"
+        ls -la release-assets/ | sed 's/^/  /'
+        echo ""
+        echo "🔗 Release URL: https://github.com/${{ github.repository }}/releases/tag/${{ steps.get_tag.outputs.tag }}"

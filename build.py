@@ -765,18 +765,115 @@ class BuildScript:
             else:
                 print(f"{Colors.YELLOW}Warning: {project_name} directory not found at {project_dir}, skipping cargo test{Colors.END}")
 
-    def build_all(self):
-        """Execute the complete build process"""
+    def clean_all(self):
+        """Clean all build artifacts and temporary directories"""
+        print(f"{Colors.BOLD}{Colors.CYAN}=== Cleaning build artifacts ==={Colors.END}")
+        
+        clean_targets = [
+            # .NET build outputs
+            (self.base_dir / "dotnet-crypto" / "bin", "dotnet-crypto build outputs"),
+            (self.base_dir / "dotnet-crypto" / "obj", "dotnet-crypto intermediate files"),
+            (self.base_dir / "dotnet-crypto" / "local-nuget-repository", "dotnet-crypto temp NuGet repo"),
+            (self.base_dir / "Proton.SDK" / "src" / "**" / "bin", "Proton.SDK build outputs"),
+            (self.base_dir / "Proton.SDK" / "src" / "**" / "obj", "Proton.SDK intermediate files"),
+            
+            # Rust build outputs
+            (self.base_dir / "proton-sdk-rs" / "target", "Rust build outputs"),
+            (self.base_dir / "proton-sdk-sys" / "target", "proton-sdk-sys build outputs"),
+            
+            # Native libraries
+            (self.base_dir / "proton-sdk-sys" / "native-libs", "Native libraries"),
+            
+            # Local NuGet repository
+            (self.local_nuget_repo, "Local NuGet repository"),
+            
+            # Go build artifacts
+            (self.base_dir / "dotnet-crypto" / "bin" / "runtimes", "Go build artifacts"),
+        ]
+        
+        for target_path, description in clean_targets:
+            if target_path.exists():
+                if target_path.is_dir():
+                    # Handle glob patterns for nested directories
+                    if "**" in str(target_path):
+                        # Use glob to find matching directories
+                        parent_path = Path(str(target_path).split("**")[0])
+                        pattern = str(target_path).split("**")[1].lstrip("/\\")
+                        if parent_path.exists():
+                            for match in parent_path.glob(f"**/{pattern}"):
+                                if match.is_dir():
+                                    try:
+                                        shutil.rmtree(match)
+                                        print(f"{Colors.GREEN}Removed: {match} ({description}){Colors.END}")
+                                    except Exception as e:
+                                        print(f"{Colors.YELLOW}Warning: Could not remove {match}: {e}{Colors.END}")
+                    else:
+                        try:
+                            shutil.rmtree(target_path)
+                            print(f"{Colors.GREEN}Removed: {target_path} ({description}){Colors.END}")
+                        except Exception as e:
+                            print(f"{Colors.YELLOW}Warning: Could not remove {target_path}: {e}{Colors.END}")
+                else:
+                    try:
+                        target_path.unlink()
+                        print(f"{Colors.GREEN}Removed: {target_path} ({description}){Colors.END}")
+                    except Exception as e:
+                        print(f"{Colors.YELLOW}Warning: Could not remove {target_path}: {e}{Colors.END}")
+            else:
+                print(f"{Colors.CYAN}Not found: {target_path} ({description}){Colors.END}")
+        
+        # Clean cargo cache for this workspace
+        for rust_project in ["proton-sdk-rs", "proton-sdk-sys"]:
+            project_dir = self.base_dir / rust_project
+            if project_dir.exists():
+                print(f"{Colors.BLUE}Running cargo clean in {rust_project}...{Colors.END}")
+                try:
+                    self.run_command("cargo clean", cwd=project_dir)
+                    print(f"{Colors.GREEN}+ Cargo clean completed for {rust_project}{Colors.END}")
+                except subprocess.CalledProcessError as e:
+                    print(f"{Colors.YELLOW}Warning: Cargo clean failed for {rust_project}: {e}{Colors.END}")
+        
+        # Clean .NET restore cache
+        try:
+            print(f"{Colors.BLUE}Cleaning .NET NuGet cache...{Colors.END}")
+            self.run_command("dotnet nuget locals all --clear")
+            print(f"{Colors.GREEN}+ .NET NuGet cache cleared{Colors.END}")
+        except subprocess.CalledProcessError as e:
+            print(f"{Colors.YELLOW}Warning: Could not clear .NET cache: {e}{Colors.END}")
+    
+        print(f"{Colors.BOLD}{Colors.GREEN}=== Clean completed ==={Colors.END}")
+
+    def build_all(self, exclude_steps=None):
+        """Execute the complete build process, optionally excluding certain steps"""
+        if exclude_steps is None:
+            exclude_steps = []
+        
+        # Define all build steps in order
+        all_steps = [
+            ("clone", "Repository cloning", self.clone_repositories),
+            ("crypto", "dotnet-crypto build", self.build_dotnet_crypto),
+            ("sdk", "Proton.SDK build", self.build_proton_sdk),
+            ("rust", "proton-sdk-rs build", self.build_proton_sdk_rs),
+            ("protos", "Protobuf copying", self.copy_protobufs),
+        ]
+        
         try:
             print(f"{Colors.BOLD}{Colors.MAGENTA}Starting build process in:{Colors.END} {self.base_dir}")
             print(f"{Colors.BOLD}{Colors.MAGENTA}Target OS/Arch:{Colors.END} {self.os_name}/{self.arch}")
             
+            if exclude_steps:
+                print(f"{Colors.YELLOW}Excluding steps: {', '.join(exclude_steps)}{Colors.END}")
+            
             self._check_windows_shell()
             self.check_dependencies()
-            self.clone_repositories()
-            self.build_dotnet_crypto()
-            self.build_proton_sdk()
-            self.build_proton_sdk_rs()
+            
+            # Execute steps that are not excluded
+            for step_name, step_desc, step_func in all_steps:
+                if step_name not in exclude_steps:
+                    print(f"{Colors.BOLD}{Colors.CYAN}=== {step_desc} ==={Colors.END}")
+                    step_func()
+                else:
+                    print(f"{Colors.YELLOW}Skipping {step_desc} (excluded){Colors.END}")
             
             print(f"{Colors.BOLD}{Colors.GREEN}=== Build completed successfully! ==={Colors.END}")
             
@@ -790,6 +887,110 @@ class BuildScript:
             print(f"{Colors.RED}Build failed - OS error:{Colors.END} {e}")
             sys.exit(1)
 
+    def build_dll_only(self):
+        """Build only the .NET AOT library and copy to native-libs folder"""
+        print(f"{Colors.BOLD}{Colors.CYAN}=== Building DLL only ==={Colors.END}")
+        
+        # Determine the runtime identifier based on the current platform
+        dotnet_arch = 'x64' if self.arch == 'amd64' else self.arch
+        if self.os_name == 'windows':
+            runtime_id = f"win-{dotnet_arch}"
+            lib_extension = ".dll"
+        elif self.os_name == 'linux':
+            runtime_id = f"linux-{dotnet_arch}"
+            lib_extension = ".so"
+        elif self.os_name == 'macos':
+            runtime_id = f"osx-{dotnet_arch}"
+            lib_extension = ".dylib"
+        else:
+            runtime_id = f"{self.os_name}-{dotnet_arch}"
+            lib_extension = ".so"  # fallback
+    
+        # Check if Proton.SDK exists
+        sdk_dir = self.base_dir / "Proton.SDK"
+        if not sdk_dir.exists():
+            print(f"{Colors.RED}Error: Proton.SDK directory not found at {sdk_dir}{Colors.END}")
+            print(f"{Colors.YELLOW}Please run 'python build.py --step clone' first to clone repositories{Colors.END}")
+            return
+        
+        src_dir = sdk_dir / "src"
+        drive_project = src_dir / "Proton.Sdk.Drive.CExports" / "Proton.Sdk.Drive.CExports.csproj"
+        
+        if not drive_project.exists():
+            print(f"{Colors.RED}Error: Proton.Sdk.Drive.CExports.csproj not found at {drive_project}{Colors.END}")
+            return
+        
+        print(f"{Colors.BLUE}Building AOT library for runtime: {runtime_id}{Colors.END}")
+        
+        # Restore packages first
+        print(f"{Colors.BLUE}Restoring packages...{Colors.END}")
+        try:
+            self.run_command(f'dotnet restore "{drive_project}"')
+            print(f"{Colors.GREEN}Package restore completed{Colors.END}")
+        except subprocess.CalledProcessError as e:
+            print(f"{Colors.YELLOW}Warning: Package restore failed, continuing with build: {e}{Colors.END}")
+        
+        # Build with AOT
+        try:
+            self.run_command(
+                f'dotnet publish "{drive_project}" '
+                f'-r {runtime_id} '
+                f'--self-contained '
+                f'-p:PublishAot=true'
+            )
+            print(f"{Colors.GREEN}AOT compilation completed for {runtime_id}{Colors.END}")
+        except subprocess.CalledProcessError as e:
+            print(f"{Colors.RED}AOT Library compilation failed: {e}{Colors.END}")
+            return
+        
+        # Find the built library
+        aot_publish_dir = src_dir / "Proton.Sdk.Drive.CExports" / "bin" / "Release" / "net9.0" / runtime_id / "publish"
+        aot_output_dir = src_dir / "Proton.Sdk.Drive.CExports" / "bin" / "Release" / "net9.0" / runtime_id
+        
+        source_dir = None
+        if aot_publish_dir.exists():
+            print(f"{Colors.BLUE}Found AOT published binaries at: {aot_publish_dir}{Colors.END}")
+            source_dir = aot_publish_dir
+        elif aot_output_dir.exists():
+            print(f"{Colors.BLUE}Found AOT output binaries at: {aot_output_dir}{Colors.END}")
+            source_dir = aot_output_dir
+        else:
+            print(f"{Colors.RED}Error: No AOT output found{Colors.END}")
+            return
+        
+        # Create native-libs directory in the same directory as the build script
+        build_script_dir = Path(__file__).parent
+        native_libs_dir = build_script_dir / "native-libs" / runtime_id
+        native_libs_dir.mkdir(parents=True, exist_ok=True)
+        
+        print(f"{Colors.CYAN}Creating native-libs at: {native_libs_dir}{Colors.END}")
+        
+        # Copy library files (excluding .pdb files)
+        copied_files = []
+        for item in source_dir.rglob('*'):
+            if item.is_file():
+                # Skip .pdb files
+                if item.suffix.lower() == '.pdb':
+                    print(f"{Colors.YELLOW}Skipping PDB file: {item.name}{Colors.END}")
+                    continue
+                
+                # Copy the file
+                dst_file = native_libs_dir / item.name
+                shutil.copy2(item, dst_file)
+                copied_files.append(item.name)
+                print(f"{Colors.GREEN}Copied: {item.name}{Colors.END}")
+        
+        if copied_files:
+            print(f"{Colors.GREEN}Successfully copied {len(copied_files)} files to {native_libs_dir}{Colors.END}")
+            
+            # Find and highlight the main library file
+            main_lib_files = [f for f in copied_files if lib_extension in f.lower()]
+            if main_lib_files:
+                print(f"{Colors.BOLD}{Colors.GREEN}Main library: {main_lib_files[0]}{Colors.END}")
+            
+            print(f"{Colors.CYAN}Native libraries location: {native_libs_dir}{Colors.END}")
+        else:
+            print(f"{Colors.YELLOW}No files were copied{Colors.END}")
 
 def main():
     parser = argparse.ArgumentParser(description="Build proton-sdk-rs and dependencies")
@@ -805,31 +1006,71 @@ def main():
     parser.add_argument(
         "--skip-clone", 
         action="store_true", 
-        help="Skip repository cloning"
+        help="Skip repository cloning (deprecated: use --exclude clone)"
     )
     parser.add_argument(
         "--step", 
-        choices=["clone", "crypto", "sdk", "rust", "protos", "all"],
+        choices=["clone", "crypto", "sdk", "rust", "protos", "dll", "all"],
         default="all",
         help="Run specific build step only"
+    )
+    parser.add_argument(
+        "--exclude", 
+        action="append",
+        choices=["clone", "crypto", "sdk", "rust", "protos"],
+        help="Exclude specific build steps (can be used multiple times)"
+    )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Clean all build artifacts and exit"
     )
     
     args = parser.parse_args()
     
     builder = BuildScript(base_dir=args.base_dir, arch=args.arch)
     
+    # Handle clean command
+    if args.clean:
+        builder.clean_all()
+        return
+    
+    # Handle deprecated --skip-clone flag
+    exclude_steps = args.exclude or []
+    if args.skip_clone:
+        print(f"{Colors.YELLOW}Warning: --skip-clone is deprecated, use --exclude clone instead{Colors.END}")
+        if "clone" not in exclude_steps:
+            exclude_steps.append("clone")
+    
     if args.step == "all":
-        builder.build_all()
+        builder.build_all(exclude_steps=exclude_steps)
     elif args.step == "clone":
-        builder.clone_repositories()
+        if "clone" not in exclude_steps:
+            builder.clone_repositories()
+        else:
+            print(f"{Colors.YELLOW}Clone step excluded, nothing to do{Colors.END}")
     elif args.step == "crypto":
-        builder.build_dotnet_crypto()
+        if "crypto" not in exclude_steps:
+            builder.build_dotnet_crypto()
+        else:
+            print(f"{Colors.YELLOW}Crypto step excluded, nothing to do{Colors.END}")
     elif args.step == "sdk":
-        builder.build_proton_sdk()
+        if "sdk" not in exclude_steps:
+            builder.build_proton_sdk()
+        else:
+            print(f"{Colors.YELLOW}SDK step excluded, nothing to do{Colors.END}")
     elif args.step == "rust":
-        builder.build_proton_sdk_rs()
+        if "rust" not in exclude_steps:
+            builder.build_proton_sdk_rs()
+        else:
+            print(f"{Colors.YELLOW}Rust step excluded, nothing to do{Colors.END}")
     elif args.step == "protos":
-        builder.copy_protobufs()
+        if "protos" not in exclude_steps:
+            builder.copy_protobufs()
+        else:
+            print(f"{Colors.YELLOW}Protos step excluded, nothing to do{Colors.END}")
+    elif args.step == "dll":
+        builder.build_dll_only()
 
 
 if __name__ == "__main__":
