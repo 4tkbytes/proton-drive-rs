@@ -5,3 +5,4 @@ dotnet-crypto
 Cargo.lock
 **/*/.env
 .env
+local-nuget-repository
