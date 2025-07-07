@@ -1,5 +1,6 @@
 /target
-proton-sdk-sys/native-libs
+**/native-libs
 Proton.SDK
 dotnet-crypto
 Cargo.lock
+**/*/.env

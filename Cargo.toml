@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = [ "proton-sdk-rs" , "proton-sdk-sys" ]
+members = [ "proton-drive", "proton-sdk-rs" , "proton-sdk-sys" ]
 
 [workspace.dependencies]
 libc = "0.2"

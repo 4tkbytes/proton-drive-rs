@@ -2,6 +2,8 @@ use std::{ffi::c_void, fmt, sync::{Arc, Mutex}};
 
 use proton_sdk_sys::{cancellation::CancellationToken, data::{AsyncCallback, BooleanCallback, ByteArray, Callback}, protobufs::{AddressKeyRegistrationRequest, ProtonClientOptions, SessionBeginRequest, SessionRenewRequest, SessionResumeRequest, ToByteArray}, sessions::{self, SessionHandle}};
 
+use crate::cancellation::{self, CancellationTokenSource};
+
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
     #[error("SDK error: {0}")]
@@ -245,6 +247,9 @@ impl SessionBuilder {
         let secret_callback = BooleanCallback::new(callback_ptr, Some(secret_requested_c_callback));
         let tokens_callback = Callback::new(callback_ptr, Some(tokens_refreshed_c_callback));
 
+        let cancellation_token = CancellationTokenSource::new()    
+            .map_err(|e| SessionError::SdkError(e))?;
+
         // success callback
         extern "C" fn session_success_callback(state: *const c_void, response: ByteArray) {
             if !state.is_null() {
@@ -252,6 +257,7 @@ impl SessionBuilder {
                     let data = &*(state as *const CallbackData);
                     if let Ok(mut guard) = data.completion_sender.lock() {
                         if let Some(sender) = guard.take() {
+                            println!("Session success callback hit!");
                             // TODO: Parse the actual session handle from response
                             // For now, assuming a successful response means we got a handle
                             let _ = sender.send(Ok(SessionHandle::from(12345))); // Replace with actual parsing
@@ -268,6 +274,7 @@ impl SessionBuilder {
                     let data = &*(state as *const CallbackData);
                     if let Ok(mut guard) = data.completion_sender.lock() {
                         if let Some(sender) = guard.take() {
+                            println!("Session failure callback hit!");
                             let _ = sender.send(Err(SessionError::OperationFailed(-1)));
                         }
                     }
@@ -279,7 +286,7 @@ impl SessionBuilder {
             callback_ptr,
             Some(session_success_callback),
             Some(session_failure_callback),
-            CancellationToken::NONE.raw(),
+            cancellation_token.handle().raw()
         );
 
         unsafe {
@@ -449,5 +456,29 @@ impl fmt::Display for SessionPlatform {
             SessionPlatform::iOS => write!(f, "ios"),
             SessionPlatform::Linux => write!(f, "linux")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::sessions::{SessionBuilder, SessionPlatform};
+
+    #[tokio::test]
+    async fn test_session_builder() {
+        let session_result = SessionBuilder::new(
+            "aPriestImamAndRabbiWalkIntoABar@protonmail.com", 
+            "The bartender asks, `What is this, a joke?`"
+        )
+            .with_app_version(SessionPlatform::Windows, "proton-sdk-rs-testing", "0.1.0")
+            .with_request_response_callback(|data| {
+                println!("Request/Response: {:?}", data);
+            })
+            .with_secret_requested_callback(|| {
+                println!("Secret requested");
+                true
+            })
+            .begin()
+            .await;
+        
     }
 }

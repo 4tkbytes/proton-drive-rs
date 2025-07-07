@@ -1,4 +1,4 @@
-use crate::ProtonSDKLib;
+use crate::{cancellation, ProtonSDKLib};
 
 /// Handle for a cancellation token source (raw type)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
