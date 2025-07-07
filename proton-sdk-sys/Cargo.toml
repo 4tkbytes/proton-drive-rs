@@ -1,6 +1,6 @@
 [package]
 name = "proton-sdk-sys"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["tk <4tkbytes@pm.me>"]
 license = "MIT"
