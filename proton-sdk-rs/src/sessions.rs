@@ -195,6 +195,7 @@ impl SessionBuilder {
             let version = format!("{}-drive-{}@{}", platform, app_name, app_version);
             options.app_version = version.to_string();
         }
+        println!("App version: {}-drive-{}@{}", platform, app_name, app_version);
         self
     }
 
@@ -202,6 +203,7 @@ impl SessionBuilder {
         if let Some(ref mut options) = self.request.options {
             options.app_version = "macos-drive@1.0.0-alpha.1+rclone".to_string();
         }
+        println!("App version: macos-drive@1.0.0-alpha.1+rclone");
         self
     }
 
@@ -286,13 +288,13 @@ impl SessionBuilder {
                     
                     // Provide specific guidance based on error codes
                     match error_code {
-                        401 => println!("💡 Authentication failed - check username/password"),
-                        403 => println!("💡 Access forbidden - account may be suspended"),
-                        422 => println!("💡 Invalid request - check your input data"),
-                        429 => println!("💡 Rate limited - try again later"),
-                        1000..=1999 => println!("💡 Client error - check your request format"),
-                        2000..=2999 => println!("💡 Server error - Proton service may be down"),
-                        _ => println!("💡 Check network connectivity and credentials"),
+                        401 => println!("Authentication failed - check username/password"),
+                        403 => println!("Access forbidden - account may be suspended"),
+                        422 => println!("Invalid request - check your input data"),
+                        429 => println!("Rate limited - try again later"),
+                        1000..=1999 => println!("Client error - check your request format"),
+                        2000..=2999 => println!("Server error - Proton service may be down"),
+                        _ => println!("Check network connectivity and credentials"),
                     }
                     
                     if let Ok(mut guard) = data.completion_sender.lock() {

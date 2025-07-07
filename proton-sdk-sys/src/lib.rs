@@ -60,7 +60,7 @@ impl ProtonSDKLib {
         
         match Library::new(&library_path) {
             Ok(lib) => {
-                println!("✅ Loaded SDK library from: {}", library_path.display());
+                println!("Loaded SDK library from: {}", library_path.display());
                 Ok((lib, library_path))
             },
             Err(e) => {
@@ -70,11 +70,11 @@ impl ProtonSDKLib {
                 for fallback_path in Self::get_fallback_paths() {
                     match Library::new(&fallback_path) {
                         Ok(lib) => {
-                            println!("✅ Loaded SDK library from fallback: {}", fallback_path.display());
+                            println!("Loaded SDK library from fallback: {}", fallback_path.display());
                             return Ok((lib, fallback_path));
                         },
                         Err(fallback_err) => {
-                            eprintln!("⚠️  Fallback failed for {}: {}", fallback_path.display(), fallback_err);
+                            eprintln!("Fallback failed for {}: {}", fallback_path.display(), fallback_err);
                         }
                     }
                 }
