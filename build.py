@@ -396,8 +396,31 @@ class BuildScript:
         # Build Go cryptography library using integrated logic
         self.build_go_crypto(crypto_dir)
         
-        # Create local nuget repository in project directory
+        # Create local nuget repository in project directory FIRST
         local_nuget_temp = crypto_dir / "local-nuget-repository"
+        local_nuget_temp.mkdir(parents=True, exist_ok=True)
+        
+        # Ensure main local nuget repository exists in project directory
+        self.local_nuget_repo.mkdir(parents=True, exist_ok=True)
+        
+        # Configure NuGet sources AFTER creating directories
+        print(f"{Colors.BLUE}Configuring NuGet source ProtonRepository...{Colors.END}")
+        try:
+            # Try to remove existing ProtonRepository source (ignore errors if it doesn't exist)
+            self.run_command('dotnet nuget remove source ProtonRepository')
+            print(f"{Colors.GREEN}Removed existing ProtonRepository source{Colors.END}")
+        except subprocess.CalledProcessError:
+            print(f"{Colors.CYAN}ProtonRepository source didn't exist, continuing...{Colors.END}")
+        
+        # Add nuget source only after directory exists
+        try:
+            self.run_command(
+                f'dotnet nuget add source "{self.local_nuget_repo}" --name ProtonRepository'
+            )
+            print(f"{Colors.GREEN}Added ProtonRepository source: {self.local_nuget_repo}{Colors.END}")
+        except subprocess.CalledProcessError as e:
+            print(f"{Colors.RED}Failed to add NuGet source: {e}{Colors.END}")
+            raise
         
         # Pack the project with multiple target frameworks
         self.run_command(
@@ -462,32 +485,15 @@ class BuildScript:
             else:
                 print(f"{Colors.YELLOW}Warning: No native libraries found in {crypto_bin_dir}{Colors.END}")
         
-        # Ensure local nuget repository exists in project directory
-        self.local_nuget_repo.mkdir(parents=True, exist_ok=True)
-        
         # Move packages to project directory
         if local_nuget_temp.exists():
             for file in local_nuget_temp.glob("*"):
-                shutil.move(str(file), str(self.local_nuget_repo / file.name))
-    
-        # Remove existing ProtonRepository source and add it fresh
-        print(f"{Colors.BLUE}Configuring NuGet source ProtonRepository...{Colors.END}")
-        try:
-            # Try to remove existing ProtonRepository source (ignore errors if it doesn't exist)
-            self.run_command('dotnet nuget remove source ProtonRepository')
-            print(f"{Colors.GREEN}Removed existing ProtonRepository source{Colors.END}")
-        except subprocess.CalledProcessError:
-            print(f"{Colors.CYAN}ProtonRepository source didn't exist, continuing...{Colors.END}")
-        
-        # Add nuget source
-        try:
-            self.run_command(
-                f'dotnet nuget add source "{self.local_nuget_repo}" --name ProtonRepository'
-            )
-            print(f"{Colors.GREEN}Added ProtonRepository source: {self.local_nuget_repo}{Colors.END}")
-        except subprocess.CalledProcessError as e:
-            print(f"{Colors.RED}Failed to add NuGet source: {e}{Colors.END}")
-            raise
+                if file.is_file():  # Only move files, not directories
+                    dest_file = self.local_nuget_repo / file.name
+                    if dest_file.exists():
+                        dest_file.unlink()  # Remove existing file
+                    shutil.move(str(file), str(dest_file))
+                    print(f"{Colors.GREEN}Moved {file.name} to {dest_file}{Colors.END}")
 
     def build_proton_sdk(self):
         """Build Proton.SDK"""

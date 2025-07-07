@@ -6,3 +6,4 @@ Cargo.lock
 **/*/.env
 .env
 local-nuget-repository
+*.bat

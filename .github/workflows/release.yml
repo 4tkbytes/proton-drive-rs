@@ -20,6 +20,7 @@ jobs:
     name: Build Native Libraries
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
@@ -71,15 +72,22 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
-        sudo apt-get install -y gcc-aarch64-linux-gnu gcc-multilib
-        # Set up cross-compilation for ARM64 if needed
         if [ "${{ matrix.arch }}" = "arm64" ]; then
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
           echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+        else
+          sudo apt-get install -y gcc-multilib g++-multilib
         fi
 
     - name: Clone dependencies
       run: python build.py --step clone --arch ${{ matrix.arch }}
+
+    - name: Build crypto dependencies
+      run: python build.py --step crypto --arch ${{ matrix.arch }}
+
+    - name: Build SDK
+      run: python build.py --step sdk --arch ${{ matrix.arch }}
 
     - name: Build native library
       run: python build.py --step dll --arch ${{ matrix.arch }}
@@ -196,44 +204,6 @@ jobs:
           - .NET ${{ env.DOTNET_VERSION }}
           - Rust ${{ env.RUST_VERSION }}
           - AOT compilation enabled for optimal performance
-        EOF
-        else
-          echo "📝 Generating default release notes (RELEASE.md not found)"
-          cat > release_notes.md << 'EOF'
-        # Proton SDK Native Libraries ${{ steps.get_tag.outputs.tag }}
-        
-        This release contains pre-built native libraries for the Proton SDK.
-        
-        ## 📦 Available Platforms
-        
-        - **Windows**: `win-x64`, `win-arm64`
-        - **Linux**: `linux-x64`, `linux-arm64`
-        - **macOS**: `osx-x64`, `osx-arm64`
-        
-        ## 📋 What's Included
-        
-        Each platform archive contains:
-        - AOT-compiled .NET native library
-        - Required runtime dependencies
-        - Platform-specific bindings
-        
-        ## 🚀 Usage
-        
-        1. Download the appropriate archive for your platform
-        2. Extract to your project's native libraries directory
-        3. Reference the library in your Rust project via `proton-sdk-sys`
-        
-        ## 📁 Archive Contents
-        
-        - Individual platform archives: `proton-sdk-native-{platform}.{zip|tar.gz}`
-        - Combined archive: `proton-sdk-native-all-platforms.tar.gz`
-        
-        ---
-        
-        **Built with:**
-        - .NET ${{ env.DOTNET_VERSION }}
-        - Rust ${{ env.RUST_VERSION }}
-        - AOT compilation enabled for optimal performance
         EOF
         fi
 
