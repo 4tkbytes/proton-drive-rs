@@ -193,6 +193,7 @@ jobs:
         name: native-libs-${{ matrix.runtime }}
         path: native-libs/${{ matrix.runtime }}/
         retention-days: 1
+        overwrite: true
 
   create-release:
     name: Create Release
