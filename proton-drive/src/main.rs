@@ -31,7 +31,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .with_rclone_app_version_spoof()
         .with_request_response_callback(|data| {
             let data_str = String::from_utf8_lossy(data);
-            println!("📡 HTTP: {} bytes", data.len());
+            println!("HTTP: {} bytes", data.len());
             if data.len() < 500 {
                 println!("   Content: {}", data_str);
             } else {
