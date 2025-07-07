@@ -1,8 +1,9 @@
 use std::{ffi::c_void, fmt, sync::{Arc, Mutex}};
 
-use proton_sdk_sys::{cancellation::CancellationToken, data::{AsyncCallback, BooleanCallback, ByteArray, Callback}, protobufs::{AddressKeyRegistrationRequest, ProtonClientOptions, SessionBeginRequest, SessionRenewRequest, SessionResumeRequest, ToByteArray}, sessions::{self, SessionHandle}};
+use log::{debug, error, info, trace, warn};
+use proton_sdk_sys::{data::{AsyncCallback, BooleanCallback, ByteArray, Callback}, protobufs::{AddressKeyRegistrationRequest, ProtonClientOptions, SessionBeginRequest, SessionRenewRequest, SessionResumeRequest, ToByteArray}, sessions::{self, SessionHandle}};
 
-use crate::cancellation::{CancellationTokenSource};
+use crate::cancellation::{CancellationToken};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -52,7 +53,7 @@ impl Default for SessionCallbacks {
 pub struct Session {
     handle: SessionHandle,
     _callback_data: Option<Box<CallbackData>>,
-    cancellation_token: CancellationTokenSource,
+    cancellation_token: CancellationToken,
 }
 
 impl Session {
@@ -107,17 +108,17 @@ impl Session {
             return Err(SessionError::NullHandle);
         }
 
-        println!("Ending session synchronously...");
-        println!("Session handle: {:?}", self.handle);
+        debug!("Ending session synchronously...");
+        debug!("Session handle: {:?}", self.handle);
 
         unsafe {
             match sessions::raw::session_free(self.handle) {
                 Ok(_t) => {
-                    println!("Session freed successfully");
+                    debug!("Session freed successfully");
                     Ok(())
                 },
                 Err(e) => {
-                    println!("Session free failed: {}", e);
+                    error!("Session free failed: {}", e);
                     Err(SessionError::SdkError(e))
                 }
             }
@@ -167,7 +168,7 @@ impl SessionBuilder {
             let version = format!("{}-drive-{}@{}", platform, app_name, app_version);
             options.app_version = version.to_string();
         }
-        println!("App version: {}-drive-{}@{}", platform, app_name, app_version);
+        info!("App version: {}-drive-{}@{}", platform, app_name, app_version);
         self
     }
 
@@ -175,7 +176,7 @@ impl SessionBuilder {
         if let Some(ref mut options) = self.request.options {
             options.app_version = "macos-drive@1.0.0-alpha.1+rclone".to_string();
         }
-        println!("App version: macos-drive@1.0.0-alpha.1+rclone");
+        debug!("App version: macos-drive@1.0.0-alpha.1+rclone");
         self
     }
 
@@ -228,7 +229,7 @@ impl SessionBuilder {
         let secret_callback = BooleanCallback::new(callback_ptr, Some(secret_requested_c_callback));
         let tokens_callback = Callback::new(callback_ptr, Some(tokens_refreshed_c_callback));
 
-        let cancellation_token = CancellationTokenSource::new()    
+        let cancellation_token = CancellationToken::new()    
             .map_err(|e| SessionError::SdkError(e))?;
 
         // success callback
@@ -238,27 +239,27 @@ impl SessionBuilder {
                     let data = &*(state as *const CallbackData);
                     if let Ok(mut guard) = data.completion_sender.lock() {
                         if let Some(sender) = guard.take() {
-                            println!("Session success callback hit!");
+                            debug!("Session success callback hit!");
                             
                             let response_slice = response.as_slice();
-                            println!("Success response: {} bytes", response_slice.len());
+                            trace!("Success response: {} bytes", response_slice.len());
                             
                             // Debug: Show response content
                             if response_slice.len() <= 100 {
-                                println!("Response hex: {:02x?}", response_slice);
+                                trace!("Response hex: {:02x?}", response_slice);
                                 if let Ok(response_str) = std::str::from_utf8(response_slice) {
-                                    println!("Response as string: {}", response_str);
+                                    trace!("Response as string: {}", response_str);
                                 }
                             }
                             
                             // Parse session handle
                             let session_handle = unsafe {parse_session_handle(&response)}
                                 .unwrap_or_else(|e| {
-                                    println!("Warning: {}, using default handle", e);
+                                    warn!("Warning: {}, using default handle", e);
                                     SessionHandle::from(1) // Non-zero to indicate success
                                 });
                             
-                            println!("Using session handle: {:?}", session_handle);
+                            debug!("Using session handle: {:?}", session_handle);
                             let _ = sender.send(Ok(session_handle));
                         }
                     }
@@ -271,19 +272,19 @@ impl SessionBuilder {
             if !state.is_null() {
                 unsafe {
                     let data = &*(state as *const CallbackData);
-                    println!("Session failure callback hit!");
+                    debug!("Session failure callback hit!");
                     
                     let (error_code, error_message) = parse_sdk_error(&error_data);
-                    println!("Error details: code={}, message={}", error_code, error_message);
+                    error!("Error details: code={}, message={}", error_code, error_message);
                     
                     match error_code {
-                        401 => println!("Authentication failed - check username/password"),
-                        403 => println!("Access forbidden - account may be suspended"),
-                        422 => println!("Invalid request - check your input data"),
-                        429 => println!("Rate limited - try again later"),
-                        1000..=1999 => println!("Client error - check your request format"),
-                        2000..=2999 => println!("Server error - Proton service may be down"),
-                        _ => println!("Check network connectivity and credentials"),
+                        401 => error!("Authentication failed - check username/password"),
+                        403 => error!("Access forbidden - account may be suspended"),
+                        422 => error!("Invalid request - check your input data"),
+                        429 => error!("Rate limited - try again later"),
+                        1000..=1999 => error!("Client error - check your request format"),
+                        2000..=2999 => error!("Server error - Proton service may be down"),
+                        _ => error!("Check network connectivity and credentials"),
                     }
                     
                     if let Ok(mut guard) = data.completion_sender.lock() {
@@ -349,7 +350,7 @@ impl SessionBuilder {
         let secret_callback = BooleanCallback::new(callback_ptr, Some(secret_requested_c_callback));
         let tokens_callback = Callback::new(callback_ptr, Some(tokens_refreshed_c_callback));
 
-        let cancellation_token = CancellationTokenSource::new()
+        let cancellation_token = CancellationToken::new()
             .map_err(|e| SessionError::SdkError(e))?;
 
         unsafe {
@@ -430,26 +431,25 @@ unsafe fn parse_session_handle(response: &ByteArray) -> Result<SessionHandle, St
         return Err("Empty response".to_string());
     }
     
-    println!("Response data: {} bytes", response_slice.len());
+    trace!("Response data: {} bytes", response_slice.len());
     
     // Try to parse as protobuf IntResponse first
     use proton_sdk_sys::protobufs::FromByteArray;
     if let Ok(int_response) = proton_sdk_sys::protobufs::IntResponse::from_byte_array(response) {
-        println!("Parsed as IntResponse: value = {}", int_response.value);
+        trace!("Parsed as IntResponse: value = {}", int_response.value);
         return Ok(SessionHandle::from(int_response.value as isize));
     }
     
-    // Try to parse as protobuf SessionTokens (might contain session info)
+    // Try to parse as protobuf SessionTokens
     if let Ok(session_tokens) = proton_sdk_sys::protobufs::SessionTokens::from_byte_array(response) {
-        println!("Parsed as SessionTokens - using access token hash as handle");
-        // Use a hash of the access token as session handle (not ideal but workable)
+        trace!("Parsed as SessionTokens - using access token hash as handle");
         let handle_value = session_tokens.access_token.as_bytes()
             .iter()
             .fold(0i64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as i64));
         return Ok(SessionHandle::from(handle_value as isize));
     }
     
-    // Try to interpret as raw bytes (little-endian i64)
+    // Try to interpret as raw bytes (lil indian)
     if response_slice.len() >= 8 {
         let handle_bytes = [
             response_slice[0], response_slice[1], response_slice[2], response_slice[3],
@@ -460,30 +460,29 @@ unsafe fn parse_session_handle(response: &ByteArray) -> Result<SessionHandle, St
         return Ok(SessionHandle::from(handle_value as isize));
     }
     
-    // Try to interpret as raw bytes (big-endian i64)
+    // Try to interpret as raw bytes (big indian)
     if response_slice.len() >= 8 {
         let handle_bytes = [
             response_slice[0], response_slice[1], response_slice[2], response_slice[3],
             response_slice[4], response_slice[5], response_slice[6], response_slice[7]
         ];
         let handle_value = i64::from_be_bytes(handle_bytes);
-        println!("Parsed as raw i64 (big-endian): {}", handle_value);
+        trace!("Parsed as raw i64 (big-endian): {}", handle_value);
         return Ok(SessionHandle::from(handle_value as isize));
     }
     
     // Try as string that might contain a number
     if let Ok(response_str) = std::str::from_utf8(response_slice) {
         if let Ok(handle_value) = response_str.trim().parse::<isize>() {
-            println!("Parsed as string number: {}", handle_value);
+            trace!("Parsed as string number: {}", handle_value);
             return Ok(SessionHandle::from(handle_value));
         }
     }
     
-    // Last resort: show hex dump for debugging
     if response_slice.len() <= 50 {
-        println!("Response hex dump: {:02x?}", response_slice);
+        trace!("Response hex dump: {:02x?}", response_slice);
     } else {
-        println!("Response hex dump (first 50 bytes): {:02x?}", &response_slice[..50]);
+        trace!("Response hex dump (first 50 bytes): {:02x?}", &response_slice[..50]);
     }
     
     Err(format!("Could not parse session handle from {} bytes", response_slice.len()))

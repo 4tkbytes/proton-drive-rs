@@ -5,15 +5,12 @@ pub mod downloads;
 pub mod observability;
 pub mod nodes;
 pub mod sessions;
-
 pub mod cancellation;
 pub mod drive;
-/// This module provides the data structures "translated" into rust as shown in proton_sdk.h
 pub mod data;
-#[cfg(test)]
-pub mod tests;
 
 use libloading::Library;
+use log::{debug, warn};
 use std::{path::PathBuf, sync::{Mutex, Once}};
 
 pub struct ProtonSDKLib {
@@ -60,7 +57,7 @@ impl ProtonSDKLib {
         
         match Library::new(&library_path) {
             Ok(lib) => {
-                println!("Loaded SDK library from: {}", library_path.display());
+                debug!("Loaded SDK library from: {}", library_path.display());
                 Ok((lib, library_path))
             },
             Err(e) => {
@@ -70,11 +67,11 @@ impl ProtonSDKLib {
                 for fallback_path in Self::get_fallback_paths() {
                     match Library::new(&fallback_path) {
                         Ok(lib) => {
-                            println!("Loaded SDK library from fallback: {}", fallback_path.display());
+                            debug!("Loaded SDK library from fallback: {}", fallback_path.display());
                             return Ok((lib, fallback_path));
                         },
                         Err(fallback_err) => {
-                            eprintln!("Fallback failed for {}: {}", fallback_path.display(), fallback_err);
+                            warn!("Fallback failed for {}: {}", fallback_path.display(), fallback_err);
                         }
                     }
                 }
@@ -128,12 +125,10 @@ impl ProtonSDKLib {
     let mut paths = Vec::new();
     let (_runtime_id, lib_name) = Self::get_platform_info();
     
-    // Simple fallback paths - start with current directory variations
     paths.push(PathBuf::from(format!("./{}", lib_name)));
     paths.push(PathBuf::from(format!("./libs/{}", lib_name)));
     paths.push(PathBuf::from(format!("../libs/{}", lib_name)));
     
-    // Try target directories (where cargo puts executables)
     paths.push(PathBuf::from(format!("target/debug/{}", lib_name)));
     paths.push(PathBuf::from(format!("target/release/{}", lib_name)));
     paths.push(PathBuf::from(format!("../target/debug/{}", lib_name)));

@@ -1,11 +1,11 @@
 use proton_sdk_sys::cancellation::{raw, CancellationTokenHandle};
 
 // Todo
-pub struct CancellationTokenSource {
+pub struct CancellationToken {
     handle: CancellationTokenHandle,
 }
 
-impl CancellationTokenSource {
+impl CancellationToken {
     /// Creates a new cancellation token source
     pub fn new() -> anyhow::Result<Self> {
         let handle = raw::create()?;
@@ -28,29 +28,26 @@ impl CancellationTokenSource {
     /// Free the cancellation token source
     pub fn free(self) -> anyhow::Result<()> {
         let result = raw::free(self.handle.raw());
-        // Prevent Drop from running
         std::mem::forget(self);
         result
     }
 }
 
-impl Drop for CancellationTokenSource {
+impl Drop for CancellationToken {
     fn drop(&mut self) {
         if !self.handle.is_null() {
-            // Ignore errors in Drop - we can't handle them anyway
             let _ = raw::free(self.handle.raw());
         }
     }
 }
 
-// Implement common traits for ergonomic usage
-impl Default for CancellationTokenSource {
+impl Default for CancellationToken {
     fn default() -> Self {
         Self::new().expect("Failed to create cancellation token")
     }
 }
 
-impl Clone for CancellationTokenSource {
+impl Clone for CancellationToken {
     fn clone(&self) -> Self {
         // not ideal but safe
         Self::new().unwrap_or_else(|_| Self {

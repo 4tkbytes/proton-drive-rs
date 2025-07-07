@@ -1,4 +1,5 @@
 use std::{env, io::{self, Write}};
+use log::*;
 use proton_sdk_rs::sessions::{SessionBuilder, SessionPlatform};
 
 #[tokio::main]
@@ -11,31 +12,30 @@ async fn main() -> Result<(), anyhow::Error> {
         dotenv::from_path(env_path).ok();
     }
 
+    if let Ok(log_level) = env::var("RUST_LOG") {
+        env_logger::init_from_env(env_logger::Env::default().default_filter_or(&log_level));
+    } else {
+        env_logger::init();
+        warn!("No RUST_LOG environment variable found. Setting default log level.");
+    }
+
     println!("Proton Drive Testing App, do not use with real credentials YET");
     let username = env::var("PROTON_USERNAME").expect("You must provide a username in the .env file");
     let password = env::var("PROTON_PASSWORD").expect("You must provide a password in the .env file");
 
-    println!("Creating session for user: {}", username);
-    println!("Using credentials: username={}, password={}chars", username, password.len());
+    debug!("Creating session for user: {}", username);
+    debug!("Using credentials: username={}, password={}chars", username, password.len());
 
     let session_result = SessionBuilder::new(username, password)
         // .with_app_version(SessionPlatform::Windows, "proton-drive-rs", "1.0.0")
-        
-        // Hi there whomever is looking at this: I am having this issue, where I cannot access my custom made app. 
-        // I am hit with the error: 
-        //      Error details: code=5003, message=OutdatedApp: This version of the app is no longer supported, please update to continue using the app
-        // To test out the reason, I have created a function that spoofs it to rclone. That works. 
-        // It seems that your backend does not have any implementation of custom apps such as that in the function below:
-        //      .with_app_version(SessionPlatform::Windows, "proton-drive-rs", "1.0.0")
-        // Please fix the issue when you can. Thanks :3
         .with_rclone_app_version_spoof()
         .with_request_response_callback(|data| {
             let data_str = String::from_utf8_lossy(data);
-            println!("HTTP: {} bytes", data.len());
+            trace!("HTTP: {} bytes", data.len());
             if data.len() < 500 {
-                println!("   Content: {}", data_str);
+                trace!("   Content: {}", data_str);
             } else {
-                println!("   Content (truncated): {}...", &data_str[..200]);
+                trace!("   Content (truncated): {}...", &data_str[..200]);
             }
         })
         .with_secret_requested_callback(|| {
@@ -44,14 +44,14 @@ async fn main() -> Result<(), anyhow::Error> {
             let mut input = String::new();
             io::stdin().read_line(&mut input).unwrap();
             let result = input.trim().to_lowercase() == "y";
-            println!("   Secret callback returning: {}", result);
+            trace!("   Secret callback returning: {}", result);
             result
         })
         .with_tokens_refreshed_callback(|tokens| {
             println!("Authentication tokens refreshed: {} bytes", tokens.len());
             let tokens_str = String::from_utf8_lossy(tokens);
             if tokens_str.is_ascii() && tokens_str.len() < 200 {
-                println!("   Tokens: {}", tokens_str);
+                trace!("   Tokens: {}", tokens_str);
             }
         })
         .begin()

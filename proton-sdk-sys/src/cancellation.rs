@@ -32,19 +32,6 @@ impl From<isize> for CancellationTokenHandle {
     }
 }
 
-pub struct CancellationToken;
-
-impl CancellationToken {
-    /// A token that will never be cancelled
-    /// Equivalent to CancellationToken.None in .NET
-    pub const NONE: CancellationTokenHandle = CancellationTokenHandle(-1);
-    
-    /// Creates a new "None" token (same as NONE constant)
-    pub fn none() -> CancellationTokenHandle {
-        Self::NONE
-    }
-}
-
 pub mod raw {
     use super::*;
     
