@@ -4,3 +4,4 @@ Proton.SDK
 dotnet-crypto
 Cargo.lock
 **/*/.env
+.env

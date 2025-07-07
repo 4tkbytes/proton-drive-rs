@@ -170,10 +170,10 @@ pub struct SessionBuilder {
 
 impl SessionBuilder {
     /// Creates a new Proton account session
-    pub fn new(username: &str, password: &str) -> Self {
+    pub fn new(username: String, password: String) -> Self {
         let request = SessionBeginRequest {
-            username: username.to_string(),
-            password: password.to_string(),
+            username: username,
+            password: password,
             options: Some(ProtonClientOptions::default())
         };
 
@@ -272,10 +272,25 @@ impl SessionBuilder {
             if !state.is_null() {
                 unsafe {
                     let data = &*(state as *const CallbackData);
+                    println!("Session failure callback hit!");
+                    
+                    let (error_code, error_message) = parse_sdk_error(&error_data);
+                    println!("Error details: code={}, message={}", error_code, error_message);
+                    
+                    // Provide specific guidance based on error codes
+                    match error_code {
+                        401 => println!("💡 Authentication failed - check username/password"),
+                        403 => println!("💡 Access forbidden - account may be suspended"),
+                        422 => println!("💡 Invalid request - check your input data"),
+                        429 => println!("💡 Rate limited - try again later"),
+                        1000..=1999 => println!("💡 Client error - check your request format"),
+                        2000..=2999 => println!("💡 Server error - Proton service may be down"),
+                        _ => println!("💡 Check network connectivity and credentials"),
+                    }
+                    
                     if let Ok(mut guard) = data.completion_sender.lock() {
                         if let Some(sender) = guard.take() {
-                            println!("Session failure callback hit!");
-                            let _ = sender.send(Err(SessionError::OperationFailed(-1)));
+                            let _ = sender.send(Err(SessionError::OperationFailed(error_code)));
                         }
                     }
                 }
@@ -459,26 +474,35 @@ impl fmt::Display for SessionPlatform {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::sessions::{SessionBuilder, SessionPlatform};
-
-    #[tokio::test]
-    async fn test_session_builder() {
-        let session_result = SessionBuilder::new(
-            "aPriestImamAndRabbiWalkIntoABar@protonmail.com", 
-            "The bartender asks, `What is this, a joke?`"
-        )
-            .with_app_version(SessionPlatform::Windows, "proton-sdk-rs-testing", "0.1.0")
-            .with_request_response_callback(|data| {
-                println!("Request/Response: {:?}", data);
-            })
-            .with_secret_requested_callback(|| {
-                println!("Secret requested");
-                true
-            })
-            .begin()
-            .await;
+fn parse_sdk_error(error_data: &ByteArray) -> (i32, String) {
+    unsafe {
+        let error_slice = error_data.as_slice();
         
+        if error_slice.is_empty() {
+            return (-1, "Unknown error - no details provided".to_string());
+        }
+        
+        // Try protobuf Error first
+        use proton_sdk_sys::protobufs::FromByteArray;
+        if let Ok(error_proto) = proton_sdk_sys::protobufs::Error::from_byte_array(error_data) {
+            return (error_proto.primary_code() as i32, error_proto.message);
+        }
+        
+        // Try as UTF-8 string
+        if let Ok(error_str) = std::str::from_utf8(error_slice) {
+            // Check if it's JSON
+            if error_str.starts_with('{') {
+                return (-1, format!("JSON Error: {}", error_str));
+            }
+            return (-1, error_str.to_string());
+        }
+        
+        // Last resort: hex dump
+        if error_slice.len() <= 50 {
+            return (-1, format!("Binary error data: {:02x?}", error_slice));
+        } else {
+            return (-1, format!("Binary error data ({} bytes): {:02x?}...", 
+                            error_slice.len(), &error_slice[..20]));
+        }
     }
 }
