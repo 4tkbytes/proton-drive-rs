@@ -50,6 +50,15 @@ impl Default for CancellationTokenSource {
     }
 }
 
+impl Clone for CancellationTokenSource {
+    fn clone(&self) -> Self {
+        // not ideal but safe
+        Self::new().unwrap_or_else(|_| Self {
+            handle: CancellationTokenHandle::null(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
 }

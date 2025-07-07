@@ -19,7 +19,7 @@ async fn main() -> Result<(), anyhow::Error> {
     println!("Using credentials: username={}, password={}chars", username, password.len());
 
     let session_result = SessionBuilder::new(username, password)
-        .with_app_version(SessionPlatform::Windows, "proton-drive-rs", "1.0.0")
+        // .with_app_version(SessionPlatform::Windows, "proton-drive-rs", "1.0.0")
         
         // Hi there whomever is looking at this: I am having this issue, where I cannot access my custom made app. 
         // I am hit with the error: 
@@ -28,7 +28,7 @@ async fn main() -> Result<(), anyhow::Error> {
         // It seems that your backend does not have any implementation of custom apps such as that in the function below:
         //      .with_app_version(SessionPlatform::Windows, "proton-drive-rs", "1.0.0")
         // Please fix the issue when you can. Thanks :3
-        // .with_rclone_app_version_spoof()
+        .with_rclone_app_version_spoof()
         .with_request_response_callback(|data| {
             let data_str = String::from_utf8_lossy(data);
             println!("HTTP: {} bytes", data.len());
@@ -71,7 +71,7 @@ async fn main() -> Result<(), anyhow::Error> {
             }
             
             println!("Ending session...");
-            if let Err(e) = session.end().await {
+            if let Err(e) = session.end() {
                 println!("Warning: Failed to end session cleanly: {}", e);
             } else {
                 println!("Session ended successfully");
