@@ -1,6 +1,7 @@
 use std::os::raw::c_void;
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct ByteArray {
 	pub pointer: *const u8,
     pub length: usize
@@ -37,6 +38,7 @@ impl ByteArray {
     }
 }
 
+#[repr(C)]
 pub struct AsyncCallback {
     pub state: *const c_void,
     pub on_success: Option<extern "C" fn(*const c_void, ByteArray)>,
@@ -71,6 +73,7 @@ impl AsyncCallback {
     }
 }
 
+#[repr(C)]
 pub struct Callback {
     state: *const c_void,
     callback: Option<extern "C" fn(*const c_void, ByteArray)>,

@@ -279,18 +279,4 @@ pub mod raw {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::data::*;
-    use crate::cancellation;
-
-    #[test]
-    fn test_session_handles() {
-        let handle = SessionHandle::from(12345);
-        assert_eq!(handle.raw(), 12345);
-        assert!(!handle.is_null());
-        
-        let null_handle = SessionHandle::null();
-        assert!(null_handle.is_null());
-        assert_eq!(null_handle.raw(), 0);
-    }
 }

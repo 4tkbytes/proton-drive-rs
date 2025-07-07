@@ -17,6 +17,7 @@ libc = "0.2"
 libloading = "0.8"
 prost = "0.14"
 prost-types = "0.14"
+thiserror = "2.0.1"
 
 [build-dependencies]
 prost-build = "0.14"

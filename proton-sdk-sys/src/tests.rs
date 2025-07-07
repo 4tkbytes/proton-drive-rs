@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::ProtonSDKLib;
+use crate::{protobufs::ProtonClientOptions, ProtonSDKLib};
 use std::ffi::c_void;
 
 /// Test function that creates and destroys a cancellation token source

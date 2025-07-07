@@ -13,6 +13,7 @@ impl CancellationTokenSource {
             handle: CancellationTokenHandle(handle),
         })
     }
+
     
     /// Fetches the handle
     pub fn handle(&self) -> CancellationTokenHandle {
@@ -51,27 +52,4 @@ impl Default for CancellationTokenSource {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cancellation_token_creation() {
-        let token = CancellationTokenSource::new();
-        match token {
-            Ok(token) => {
-                assert!(!token.handle().is_null());
-                println!("✓ Cancellation token created with handle: {:?}", token.handle());
-            }
-            Err(e) => {
-                println!("Failed to create cancellation token: {}", e);
-            }
-        }
-    }
-    
-    #[test]
-    fn test_cancellation_token_cancel() {
-        if let Ok(token) = CancellationTokenSource::new() {
-            assert!(token.cancel().is_ok());
-            println!("✓ Cancellation token cancelled successfully");
-        }
-    }
 }

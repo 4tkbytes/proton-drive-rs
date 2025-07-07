@@ -1,6 +1,10 @@
+pub mod protobufs;
+pub mod logger;
+pub mod uploader;
+pub mod downloads;
+pub mod observability;
 pub mod nodes;
 pub mod sessions;
-include!(concat!(env!("OUT_DIR"), "/_.rs"));
 
 pub mod cancellation;
 pub mod drive;
