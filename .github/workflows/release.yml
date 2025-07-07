@@ -251,28 +251,6 @@ jobs:
         if [ -f "RELEASE.md" ]; then
           echo "📄 Using release notes from RELEASE.md"
           cp RELEASE.md release_notes.md
-          
-          # Add build information at the end
-          cat >> release_notes.md << 'EOF'
-          
-          ---
-          
-          ## 📦 Available Platforms
-          
-          - **Windows**: `win-x64`, `win-arm64`
-          - **Linux**: `linux-x64`, `linux-arm64`
-          - **macOS**: `osx-x64`, `osx-arm64`
-          
-          ## 📁 Archive Contents
-          
-          - Individual platform archives: `proton-sdk-native-{platform}.{zip|tar.gz}`
-          - Combined archive: `proton-sdk-native-all-platforms.tar.gz`
-          
-          **Built with:**
-          - .NET ${{ env.DOTNET_VERSION }}
-          - Rust ${{ env.RUST_VERSION }}
-          - AOT compilation enabled for optimal performance
-        EOF
         fi
 
     - name: Create Release
