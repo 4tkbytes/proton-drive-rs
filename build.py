@@ -500,105 +500,6 @@ class BuildScript:
                     shutil.move(str(file), str(dest_file))
                     print(f"{Colors.GREEN}Moved {file.name} to {dest_file}{Colors.END}")
 
-    def build_proton_sdk(self):
-        """Build Proton.SDK"""
-        print(f"{Colors.BOLD}{Colors.CYAN}=== Building Proton.SDK ==={Colors.END}")
-        
-        sdk_dir = self.base_dir / "Proton.SDK"
-        src_dir = sdk_dir / "src"
-        
-        os.chdir(src_dir)
-        
-        # Configure NuGet sources to include both nuget.org and local repository
-        print(f"{Colors.BLUE}Configuring NuGet sources...{Colors.END}")
-        try:
-            # Clear existing sources first and list them
-            self.run_command('dotnet nuget list source', capture_output=True)
-            
-            # Remove existing ProtonRepository source (ignore errors if it doesn't exist)
-            try:
-                self.run_command('dotnet nuget remove source ProtonRepository')
-                print(f"{Colors.GREEN}Removed existing ProtonRepository source{Colors.END}")
-            except subprocess.CalledProcessError:
-                print(f"{Colors.CYAN}ProtonRepository source didn't exist{Colors.END}")
-            
-            # Add nuget.org if not already present
-            try:
-                self.run_command('dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org')
-            except subprocess.CalledProcessError:
-                print(f"{Colors.YELLOW}nuget.org source may already exist{Colors.END}")
-            
-            # Add local repository
-            self.run_command(f'dotnet nuget add source "{self.local_nuget_repo}" -n ProtonRepository')
-            print(f"{Colors.GREEN}Added ProtonRepository source: {self.local_nuget_repo}{Colors.END}")
-            
-            print(f"{Colors.GREEN}NuGet sources configured{Colors.END}")
-        except subprocess.CalledProcessError as e:
-            print(f"{Colors.RED}Failed to configure NuGet sources: {e}{Colors.END}")
-            raise
-        
-        # Add Proton.Cryptography package to each project folder
-        for folder in src_dir.iterdir():
-            if folder.is_dir() and (folder / f"{folder.name}.csproj").exists():
-                print(f"{Colors.BLUE}Adding package to {folder.name}{Colors.END}")
-                os.chdir(folder)
-                try:
-                    # First restore packages to ensure dependencies are available
-                    self.run_command('dotnet restore')
-                    
-                    # Then add the package
-                    self.run_command(
-                        f'dotnet add package Proton.Cryptography -s "{self.local_nuget_repo}"'
-                    )
-                except subprocess.CalledProcessError:
-                    print(f"{Colors.YELLOW}Warning: Failed to add package to {folder.name}, continuing...{Colors.END}")
-                os.chdir(src_dir)
-        
-        # Publish Proton.Sdk.Drive
-        drive_project = src_dir / "Proton.Sdk.Drive.CExports" / "Proton.Sdk.Drive.CExports.csproj"
-        if drive_project.exists():
-            # Determine the runtime identifier based on the current platform
-            # Use .NET runtime identifier format (x64 instead of amd64)
-            dotnet_arch = 'x64' if self.arch == 'amd64' else self.arch
-            if self.os_name == 'windows':
-                runtime_id = f"win-{dotnet_arch}"
-                lib_suffix = ".dll"
-            elif self.os_name == 'linux':
-                runtime_id = f"linux-{dotnet_arch}"
-                lib_suffix = ".so"
-            elif self.os_name == 'macos':
-                runtime_id = f"osx-{dotnet_arch}"
-                lib_suffix = ".dylib"
-            else:
-                runtime_id = f"{self.os_name}-{dotnet_arch}"
-                lib_suffix = ".so"  # fallback
-            
-            print(f"{Colors.BLUE}Publishing with AOT for runtime: {runtime_id}{Colors.END}")
-            
-            # Restore packages first to ensure all dependencies are available
-            print(f"{Colors.BLUE}Restoring packages for {drive_project.name}...{Colors.END}")
-            try:
-                self.run_command(f'dotnet restore "{drive_project}"')
-                print(f"{Colors.GREEN}Package restore completed{Colors.END}")
-            except subprocess.CalledProcessError as e:
-                print(f"{Colors.YELLOW}Warning: Package restore failed, continuing with build: {e}{Colors.END}")
-            
-            try:
-                # Try without AOT first
-                self.run_command(
-                    f'dotnet publish "{drive_project}" '
-                    f'-r {runtime_id} '
-                    f'--self-contained '
-                    f'-p:PublishAot=true'
-                )
-                print(f"{Colors.GREEN}Non-AOT compilation completed for {runtime_id}{Colors.END}")
-            except subprocess.CalledProcessError:
-                print(f"{Colors.YELLOW}Proton SDK AOT Library compilation failed :({Colors.END}")
-                print("Gracefully exiting now")
-                sys.exit()
-        else:
-            print(f"{Colors.YELLOW}Warning: Proton.Sdk.Drive.CExports.csproj not found{Colors.END}")
-    
     def copy_protobufs(self):
         """Copy protobuf files from Proton.SDK to proton-sdk-sys"""
         print(f"{Colors.BOLD}{Colors.CYAN}=== Copying protobuf files ==={Colors.END}")
@@ -774,25 +675,15 @@ class BuildScript:
         # Copy protobuf files AFTER libraries are copied but BEFORE cargo tests
         self.copy_protobufs()
     
-        # Run cargo test for both proton-sdk-rs and proton-sdk-sys
-        rust_projects = [
-            ("proton-sdk-rs", "Rust workspace"),
-            ("proton-sdk-sys", "Native bindings")
-        ]
-        
-        for project_name, project_desc in rust_projects:
-            project_dir = self.base_dir / project_name
-            if project_dir.exists():
-                print(f"{Colors.CYAN}Running cargo testing binary (proton-drive) in {project_desc}: {project_dir}{Colors.END}")
-                os.chdir(project_dir)
-                try:
-                    self.run_command("cargo run -p proton-drive")
-                    print(f"{Colors.GREEN}+ Tests completed for {project_name}{Colors.END}")
-                except subprocess.CalledProcessError as e:
-                    print(f"{Colors.YELLOW}Warning: Tests failed for {project_name}: {e}{Colors.END}")
-                    print(f"{Colors.YELLOW}Continuing with build process...{Colors.END}")
-            else:
-                print(f"{Colors.YELLOW}Warning: {project_name} directory not found at {project_dir}, skipping cargo test{Colors.END}")
+        # Run cargo program once from the project root
+        print(f"{Colors.CYAN}Running cargo testing binary (proton-drive) from project root: {self.base_dir}{Colors.END}")
+        os.chdir(self.base_dir)
+        try:
+            self.run_command("cargo run -p proton-drive")
+            print(f"{Colors.GREEN}+ Tests completed for proton-drive{Colors.END}")
+        except subprocess.CalledProcessError as e:
+            print(f"{Colors.YELLOW}Warning: Tests failed for proton-drive: {e}{Colors.END}")
+            print(f"{Colors.YELLOW}Continuing with build process...{Colors.END}")
 
     def clean_all(self):
         """Clean all build artifacts and temporary directories"""
@@ -881,7 +772,6 @@ class BuildScript:
         all_steps = [
             ("clone", "Repository cloning", self.clone_repositories),
             ("crypto", "dotnet-crypto build", self.build_dotnet_crypto),
-            ("sdk", "Proton.SDK build", self.build_proton_sdk),
             ("rust", "proton-sdk-rs build", self.build_proton_sdk_rs),
             ("protos", "Protobuf copying", self.copy_protobufs),
         ]
@@ -1087,7 +977,8 @@ def main():
             print(f"{Colors.YELLOW}Crypto step excluded, nothing to do{Colors.END}")
     elif args.step == "sdk":
         if "sdk" not in exclude_steps:
-            builder.build_proton_sdk()
+            print(f"{Colors.YELLOW}build_proton_sdk has been removed. Use build_dll_only instead.{Colors.END}")
+            return
         else:
             print(f"{Colors.YELLOW}SDK step excluded, nothing to do{Colors.END}")
     elif args.step == "rust":

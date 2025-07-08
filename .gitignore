@@ -4,6 +4,6 @@ Proton.SDK
 dotnet-crypto
 Cargo.lock
 **/*/.env
-.env
+*.env
 local-nuget-repository
 *.bat
