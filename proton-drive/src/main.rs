@@ -1,13 +1,11 @@
 use log::*;
 use proton_sdk_rs::{
-    AddressKeyRegistrationRequest, ClientId, ProtonDriveClientCreateRequest,
-    drive::DriveClientBuilder,
-    observability::OptionalObservability,
-    sessions::{SessionBuilder, SessionPlatform},
+    drive::DriveClientBuilder, observability::OptionalObservability, sessions::{SessionBuilder, SessionPlatform}, AddressKeyRegistrationRequest, ClientId, ProtonDriveClientCreateRequest, VolumeMetadata
 };
+use tokio::time::timeout;
 use std::{
     env,
-    io::{self, Write},
+    io::{self, Write}, thread, time::Duration,
 };
 
 #[tokio::main]
@@ -31,11 +29,19 @@ async fn main() -> Result<(), anyhow::Error> {
         env::var("PROTON_USERNAME").expect("You must provide a username in the .env file");
     let password =
         env::var("PROTON_PASSWORD").expect("You must provide a password in the .env file");
+    
+    let censor = |input: &String, censor: char| {
+        let mut temp = String::new();
+        for len in 0..input.len()-2 {
+            temp.push(censor);
+        }
+        temp
+    };
 
     debug!("Creating session for user: {}", username);
     debug!(
         "Using credentials: username={}, password={}chars",
-        username,
+        format!("{}{}{}", username.chars().next().unwrap(), censor(&username, '*'), username.chars().last().unwrap()),
         password.len()
     );
 
@@ -61,6 +67,7 @@ async fn main() -> Result<(), anyhow::Error> {
             result
         })
         .with_tokens_refreshed_callback(|tokens| {
+            std::fs::write("tokens.cache", tokens).ok();
             println!("Authentication tokens refreshed: {} bytes", tokens.len());
             let tokens_str = String::from_utf8_lossy(tokens);
             if tokens_str.is_ascii() && tokens_str.len() < 200 {
@@ -119,7 +126,7 @@ async fn main() -> Result<(), anyhow::Error> {
     };
     info!("Request: {:?}", create_request);
 
-    let drive_client = match DriveClientBuilder::new(session.handle())
+    let client = match DriveClientBuilder::new(session)
         .with_observability(obs.handle())
         .with_request(create_request)
         .build()
@@ -130,6 +137,11 @@ async fn main() -> Result<(), anyhow::Error> {
         }
         Err(e) => anyhow::bail!(e),
     };
+
+    let volumes = client.get_volumes().await?;
+    for volume in &volumes {
+        println!("{:?}", volume);
+    }
 
     Ok(())
 }

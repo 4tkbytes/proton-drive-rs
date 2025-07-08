@@ -1,21 +1,19 @@
-use std::fmt;
+use std::{ffi::c_void, fmt};
 
 use log::{debug, error, warn};
 use proton_sdk_sys::{
-    drive::{self, DriveClientHandle},
-    observability::{self, ObservabilityHandle},
-    protobufs::{
-        NodeKeysRegistrationRequest, ProtonDriveClientCreateRequest, ShareKeyRegistrationRequest,
-        ToByteArray,
-    },
-    sessions::SessionHandle,
+    cancellation, data::{ByteArray}, drive::{self, DriveClientHandle}, observability::{self, ObservabilityHandle}, protobufs::{
+        NodeKeysRegistrationRequest, ProtonDriveClientCreateRequest, ShareKeyRegistrationRequest, ToByteArray, VolumeEventType, VolumeMetadata, VolumesResponse
+    }, sessions::SessionHandle
 };
 
-use crate::{observability::ObservabilityService, sessions::Session};
+use proton_sdk_sys::prost::Message;
+
+use crate::{cancellation::CancellationToken, observability::ObservabilityService, sessions::Session};
 
 pub struct DriveClient {
     handle: DriveClientHandle,
-    _session: SessionHandle,
+    session: Session,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -26,11 +24,17 @@ pub enum DriveError {
     #[error("Protobuf error: {0}")]
     ProtobufError(#[from] proton_sdk_sys::protobufs::ProtoError),
 
+    #[error("Volume error: {0}")]
+    VolumeError(anyhow::Error),
+
     #[error("Drive client creation failed with code: {0}")]
     CreationFailed(i32),
 
     #[error("Operation '{operation}' failed with code: {code}")]
     OperationFailed { operation: String, code: i32 },
+
+    #[error("Operation '{operation}' failed")]
+    OperationFailedWithoutCode { operation: String},
 
     #[error("Drive client handle is null")]
     NullHandle,
@@ -50,11 +54,11 @@ impl DriveClient {
     /// # Returns
     /// A new DriveClient instance or an error if creation failed
     pub fn new(
-        session: SessionHandle,
+        session: Session,
         observability: ObservabilityHandle,
         request: ProtonDriveClientCreateRequest,
     ) -> Result<Self, DriveError> {
-        if session.is_null() {
+        if session.handle().is_null() {
             return Err(DriveError::InvalidSession);
         }
 
@@ -63,7 +67,7 @@ impl DriveClient {
             .map_err(|e| DriveError::ProtobufError(e))?;
 
         let (result, client_handle) =
-            drive::raw::drive_client_create(session, observability, proto_buf.as_byte_array())
+            drive::raw::drive_client_create(session.handle(), observability, proto_buf.as_byte_array())
                 .map_err(|e| DriveError::SdkError(e))?;
 
         if result != 0 {
@@ -78,7 +82,7 @@ impl DriveClient {
 
         Ok(Self {
             handle: client_handle,
-            _session: session,
+            session,
         })
     }
 
@@ -164,6 +168,37 @@ impl DriveClient {
         Ok(())
     }
 
+    pub async fn get_volumes(&self) -> Result<Vec<VolumeMetadata>, DriveError> {
+        let handle = self.handle;
+        let cancellation_token = self.session.cancellation_token().handle();
+
+        let bytes = tokio::task::spawn_blocking(move || {
+            let result = drive::raw::drive_client_get_volumes(
+                handle,
+                cancellation_token)
+                .map_err(|e| DriveError::SdkError(e))?;
+
+            if result.is_empty() {
+                return Err(DriveError::VolumeError(anyhow::anyhow!("get_volume's resulting ByteArray returns empty")))
+            }
+
+            let bytes = unsafe {
+                result.as_slice().to_vec()
+            };
+
+            Ok(bytes)
+        }).await.unwrap_or_else(|e| Err(DriveError::VolumeError(anyhow::Error::new(e))))
+        .map_err(|e| e)?; // please excuse the mess the program cannot panic if there are no bytes input...
+
+        let response = match VolumesResponse::decode(&*bytes) {
+                Ok(value) => value,
+                Err(error) => return Err(DriveError::ProtobufError(error.into()))
+            };
+
+        Ok(response.volumes)
+    }
+
+    /// Manually frees up the Proton Drive client handles in memory
     pub fn free(self) -> Result<(), DriveError> {
         Ok(if !self.handle.is_null() {
             drive::raw::drive_client_free(self.handle).map_err(|e| DriveError::SdkError(e))?;
@@ -194,14 +229,14 @@ impl Drop for DriveClient {
 }
 
 pub struct DriveClientBuilder {
-    session: SessionHandle,
+    session: Session,
     observability: ObservabilityHandle,
     request: ProtonDriveClientCreateRequest,
 }
 
 impl DriveClientBuilder {
     /// Builds a new DriveClient
-    pub fn new(session: SessionHandle) -> Self {
+    pub fn new(session: Session) -> Self {
         Self {
             session: session,
             observability: ObservabilityHandle::null(),

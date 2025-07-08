@@ -265,3 +265,18 @@ message NodeNameDecryptionRequest {
     string armored_encrypted_name = 2;
     optional string signature_email_address = 3;
 }
+
+// ============================================ //
+//                  PATCH
+// ============================================ //
+
+message VolumeMetadata {
+    VolumeId volume_id = 1;
+    VolumeState state = 2;
+    int64 max_space = 3;
+    ShareId root_share_id = 4;
+}
+
+message VolumesResponse {
+    repeated VolumeMetadata volumes = 1;
+}

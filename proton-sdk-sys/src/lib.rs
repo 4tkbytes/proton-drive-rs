@@ -16,6 +16,8 @@ use std::{
     sync::{Mutex, Once},
 };
 
+pub use prost;
+
 pub struct ProtonSDKLib {
     pub sdk_library: Library,
     pub location: PathBuf,

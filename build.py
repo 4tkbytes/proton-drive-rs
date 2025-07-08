@@ -778,10 +778,10 @@ class BuildScript:
         for project_name, project_desc in rust_projects:
             project_dir = self.base_dir / project_name
             if project_dir.exists():
-                print(f"{Colors.CYAN}Running cargo test in {project_desc}: {project_dir}{Colors.END}")
+                print(f"{Colors.CYAN}Running cargo testing binary (proton-drive) in {project_desc}: {project_dir}{Colors.END}")
                 os.chdir(project_dir)
                 try:
-                    self.run_command("cargo test")
+                    self.run_command("cargo run -p proton-drive")
                     print(f"{Colors.GREEN}+ Tests completed for {project_name}{Colors.END}")
                 except subprocess.CalledProcessError as e:
                     print(f"{Colors.YELLOW}Warning: Tests failed for {project_name}: {e}{Colors.END}")

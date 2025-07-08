@@ -139,6 +139,10 @@ impl Session {
             }
         }
     }
+
+    pub fn cancellation_token(&self) -> &CancellationToken {
+        &self.cancellation_token
+    }
 }
 
 impl Drop for Session {
