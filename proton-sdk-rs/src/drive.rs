@@ -105,6 +105,10 @@ impl DriveClient {
         !self.handle.is_null()
     }
 
+    pub fn session(&self) -> &Session {
+        &self.session
+    }
+
     /// Registers node keys with the Drive client
     ///
     /// Node keys are used for encrypting/decrypting file content and metadata

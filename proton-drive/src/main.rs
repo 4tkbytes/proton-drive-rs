@@ -1,9 +1,11 @@
 use async_recursion::async_recursion;
+use chrono::Utc;
 use log::*;
 use proton_sdk_rs::{
-    drive::{DriveClient, DriveClientBuilder}, observability::OptionalObservability, sessions::{SessionBuilder, SessionPlatform}, utils, AddressKeyRegistrationRequest, ClientId, NodeIdentity, ProtonDriveClientCreateRequest, VolumeMetadata
+    downloads::DownloaderBuilder, drive::{DriveClient, DriveClientBuilder}, observability::OptionalObservability, sessions::{SessionBuilder, SessionPlatform}, utils, AddressKeyRegistrationRequest, ClientId, FileDownloadRequest, NodeIdentity, OperationIdentifier, OperationType, ProtonDriveClientCreateRequest, RevisionMetadata, VolumeMetadata
 };
 use tokio::time::timeout;
+use uuid::Uuid;
 use std::{
     env,
     io::{self, Write}, thread, time::Duration,
@@ -59,16 +61,15 @@ async fn main() -> Result<(), anyhow::Error> {
             }
         })
         .with_secret_requested_callback(|| {
-            print!("2FA/Secret required. Enter 'y' to continue: ");
-            io::stdout().flush().unwrap();
-            let mut input = String::new();
-            io::stdin().read_line(&mut input).unwrap();
-            let result = input.trim().to_lowercase() == "y";
-            trace!("   Secret callback returning: {}", result);
-            result
+            println!("Secret requested");
+            // io::stdout().flush().unwrap();
+            // let mut input = String::new();
+            // io::stdin().read_line(&mut input).unwrap();
+            // let result = input.trim().to_lowercase() == "y";
+            // trace!("   Secret callback returning: {}", result);
+            true
         })
         .with_tokens_refreshed_callback(|tokens| {
-            std::fs::write("tokens.cache", tokens).ok();
             println!("Authentication tokens refreshed: {} bytes", tokens.len());
             let tokens_str = String::from_utf8_lossy(tokens);
             if tokens_str.is_ascii() && tokens_str.len() < 200 {
@@ -116,7 +117,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     info!("Creating observability");
     let obs = OptionalObservability::enabled(session.handle())?;
-    info!("Observability handle: {:?}", obs.handle());
+    trace!("Observability handle: {:?}", obs.handle());
 
     info!("Creating Drive client");
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -125,7 +126,7 @@ async fn main() -> Result<(), anyhow::Error> {
             value: "proton-sdk-rs".to_string(),
         }),
     };
-    info!("Request: {:?}", create_request);
+    trace!("Request: {:?}", create_request);
 
     let client = match DriveClientBuilder::new(session)
         .with_observability(obs.handle())
@@ -141,23 +142,77 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let volumes = client.get_volumes().await?;
     for volume in &volumes {
-        println!("{:?}", volume);
+        trace!("volume metadata: {:?}", volume);
     }
 
     let main_volume = &volumes[0];
 
     let share = client.get_shares(main_volume).await?;
 
-    log::info!("Share information: {:?}", share);
+    log::trace!("share information: {:?}", share);
 
-    let list = recursive_list_file_root(&client, NodeIdentity { 
+    let identity = NodeIdentity { 
         node_id: share.root_node_id.clone(), 
         share_id: share.share_id.clone(), 
         volume_id: main_volume.volume_id.clone()
-    }, "".to_string()).await?;
+    };
+
+    let list = recursive_list_file_root(&client, &identity, "".to_string()).await?;
 
     for item in list {
         log::info!("{}", item)
+    }
+    let downloader = DownloaderBuilder::new(&client).build().await?;
+
+    let children = client.get_folder_children(identity.clone()).await?;
+    for child in children {
+        let (is_file, file_node) = utils::node_is_file(child);
+        if is_file && file_node.as_ref().unwrap().name == "BadApple.mp4" {
+            let file = file_node.as_ref().unwrap();
+            let mut file_identity = file.node_identity.clone();
+            if let Some(ref mut fi) = file_identity {
+                if fi.share_id.is_none() {
+                    log::warn!("Missing share id, adding...");
+                    fi.share_id = identity.share_id.clone();
+                }
+                if fi.volume_id.is_none() {
+                    log::warn!("Missing volume id, adding...");
+                    fi.volume_id = identity.volume_id.clone();
+                }
+            };
+            let revision_info = file.active_revision.as_ref().unwrap();
+            let revision = RevisionMetadata { 
+                revision_id: revision_info.revision_id.clone(),
+                state: revision_info.state,
+                manifest_signature: revision_info.manifest_signature.clone(), 
+                signature_email_address: revision_info.signature_email_address.clone(), 
+                samples_sha256_digests: revision_info.samples_sha256_digests.clone()
+            };
+            let operation = OperationIdentifier { 
+                r#type: OperationType::Download.into(),
+                identifier: Uuid::new_v4().to_string(), 
+                timestamp: Utc::now().to_rfc3339()
+            };
+            trace!("share id: {:?}", file.node_identity.as_ref().unwrap().share_id);
+            trace!("volume id: {:?}", file.node_identity.as_ref().unwrap().volume_id);
+            trace!("node id: {:?}", file.node_identity.as_ref().unwrap().node_id);
+            trace!("global share id: {:?}", share.share_id);
+
+            let request = FileDownloadRequest { 
+                file_identity, 
+                revision_metadata: Some(revision), 
+                target_file_path: String::from("C:/Users/thrib/Downloads/BadApple.mp4"), 
+                operation_id: Some(operation)
+            };
+            
+            let status = downloader.download_file(
+                request,
+                 Some(|progress| println!("Progress: {:.1}%", progress * 100.0)),
+                &client.session().cancellation_token()
+                )
+                .await?;
+            trace!("downloader status: {:?}", status);
+        }
     }
 
     Ok(())
@@ -166,7 +221,7 @@ async fn main() -> Result<(), anyhow::Error> {
 #[async_recursion]
 async fn recursive_list_file_root(
     client: &DriveClient,
-    identity: NodeIdentity,
+    identity: &NodeIdentity,
     parent_folder: String,
 ) -> anyhow::Result<Vec<String>> {
     let mut files = Vec::new();
@@ -188,8 +243,7 @@ async fn recursive_list_file_root(
                 } else {
                     format!("{}/{}", parent_folder, folder_name)
                 };
-                // Recurse into the folder
-                let mut sub_files = recursive_list_file_root(client, new_identity, new_parent).await?;
+                let mut sub_files = recursive_list_file_root(client, &new_identity, new_parent).await?;
                 files.append(&mut sub_files);
             }
         } else {

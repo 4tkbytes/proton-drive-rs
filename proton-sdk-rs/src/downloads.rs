@@ -2,13 +2,10 @@ use std::{ffi::c_void, fmt};
 
 use log::{debug, warn};
 use proton_sdk_sys::{
-    data::{AsyncCallback, AsyncCallbackWithProgress, ByteArray},
-    downloads::{self, raw, DownloaderHandle},
-    drive::DriveClientHandle,
-    protobufs::{FileDownloadRequest, ToByteArray},
+    cancellation::CancellationTokenHandle, data::{AsyncCallback, AsyncCallbackWithProgress, ByteArray}, downloads::{self, raw, DownloaderHandle}, drive::DriveClientHandle, prost::Message, protobufs::{FileDownloadRequest, IntResponse, ToByteArray}
 };
 
-use crate::cancellation::{self, CancellationToken};
+use crate::{cancellation::{self, CancellationToken}, drive::DriveClient};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DownloadError {
@@ -67,7 +64,7 @@ impl Downloader {
     /// ```
     pub async fn new(
         client: DriveClientHandle,
-        cancellation_token: &CancellationToken,
+        cancellation_token: CancellationTokenHandle,
     ) -> Result<Self, DownloadError> {
         if client.is_null() {
             return Err(DownloadError::InvalidClient);
@@ -87,26 +84,15 @@ impl Downloader {
                         >;
                     let tx = Box::from_raw(tx_ptr);
 
-                    // Parse the downloader handle from response
-                    let handle = if response.length >= 8 {
-                        let response_slice = response.as_slice();
-                        let handle_bytes = [
-                            response_slice[0],
-                            response_slice[1],
-                            response_slice[2],
-                            response_slice[3],
-                            response_slice[4],
-                            response_slice[5],
-                            response_slice[6],
-                            response_slice[7],
-                        ];
-                        let handle_value = isize::from_le_bytes(handle_bytes);
-                        DownloaderHandle::from(handle_value)
-                    } else {
-                        DownloaderHandle::from(1) // Default non-null handle
+                    let response = response.as_slice().to_vec();
+                    let handle = match IntResponse::decode(&*response) {
+                        Ok(value) => {
+                            DownloaderHandle::from(value.value as isize)
+                        },
+                        Err(e) => DownloaderHandle::null()
                     };
 
-                    println!("✅ Downloader created with handle: {:?}", handle);
+                    debug!("Downloader created with handle: {:?}", handle);
                     let _ = tx.send(Ok(handle));
                 }
             }
@@ -138,7 +124,7 @@ impl Downloader {
             tx_ptr as *const c_void,
             Some(create_success_callback),
             Some(create_failure_callback),
-            cancellation_token.handle().raw(),
+            cancellation_token.raw(),
         );
 
         // Empty request as per API specification
@@ -413,18 +399,18 @@ impl Drop for Downloader {
 
 pub struct DownloaderBuilder {
     client: DriveClientHandle,
+    token: CancellationTokenHandle
 }
 
 impl DownloaderBuilder {
-    pub fn new(client: DriveClientHandle) -> Self {
-        Self { client }
+    pub fn new(client: &DriveClient) -> Self {
+        Self { client: client.handle(), token: client.session().cancellation_token().handle() }
     }
 
     pub async fn build(
-        self,
-        cancellation_token: &CancellationToken,
+        self
     ) -> Result<Downloader, DownloadError> {
-        Downloader::new(self.client, cancellation_token).await
+        Downloader::new(self.client, self.token).await
     }
 }
 
