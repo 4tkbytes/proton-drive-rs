@@ -280,3 +280,14 @@ message VolumeMetadata {
 message VolumesResponse {
     repeated VolumeMetadata volumes = 1;
 }
+
+message NodeType {
+    oneof node_type {
+        FileNode file_node = 1;
+        FolderNode folder_node = 2;
+    }
+}
+
+message NodeTypeList {
+    repeated NodeType nodes = 1;
+}

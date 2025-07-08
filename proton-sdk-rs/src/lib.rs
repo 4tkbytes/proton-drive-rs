@@ -1,3 +1,4 @@
+pub mod utils;
 pub mod cancellation;
 pub mod downloads;
 pub mod drive;

@@ -3,7 +3,7 @@ use std::{ffi::c_void, fmt};
 use log::{debug, error, warn};
 use proton_sdk_sys::{
     cancellation, data::ByteArray, drive::{self, DriveClientHandle}, observability::{self, ObservabilityHandle}, protobufs::{
-        NodeKeysRegistrationRequest, ProtonDriveClientCreateRequest, Share, ShareKeyRegistrationRequest, ToByteArray, VolumeEventType, VolumeMetadata, VolumesResponse
+        NodeIdentity, NodeKeysRegistrationRequest, NodeType, NodeTypeList, ProtonDriveClientCreateRequest, Share, ShareKeyRegistrationRequest, ToByteArray, VolumeEventType, VolumeMetadata, VolumesResponse
     }, sessions::SessionHandle
 };
 
@@ -27,8 +27,14 @@ pub enum DriveError {
     #[error("Volume error: {0}")]
     VolumeError(anyhow::Error),
 
-    #[error("Volume error: {0}")]
+    #[error("Share error: {0}")]
     ShareError(anyhow::Error),
+
+    #[error("Node operation failed with error: {0}")]
+    NodeError(anyhow::Error),
+
+    #[error("The function returned an empty byte array")]
+    EmptyByteArray,
 
     #[error("Drive client creation failed with code: {0}")]
     CreationFailed(i32),
@@ -182,7 +188,7 @@ impl DriveClient {
                 .map_err(|e| DriveError::SdkError(e))?;
 
             if result.is_empty() {
-                return Err(DriveError::VolumeError(anyhow::anyhow!("get_volume's resulting ByteArray returns empty")))
+                return Err(DriveError::EmptyByteArray);
             }
 
             let bytes = unsafe {
@@ -190,9 +196,9 @@ impl DriveClient {
             };
 
             Ok(bytes)
-        }).await.unwrap_or_else(|e| Err(DriveError::VolumeError(anyhow::Error::new(e))))
-        .map_err(|e| e)?; // please excuse the mess the program cannot panic if there are no bytes input...
+        }).await.map_err(|e| DriveError::SdkError(anyhow::Error::new(e)))?;
 
+        let bytes = bytes?;
         let response = match VolumesResponse::decode(&*bytes) {
                 Ok(value) => value,
                 Err(error) => return Err(DriveError::ProtobufError(error.into()))
@@ -215,7 +221,7 @@ impl DriveClient {
             ).map_err(|e| DriveError::ShareError(e))?;
 
             if result.is_empty() {
-                return Err(DriveError::ShareError(anyhow::anyhow!("get_shares returned an empty buffer")));
+                return Err(DriveError::EmptyByteArray);
             }
 
             let bytes = unsafe {
@@ -223,15 +229,44 @@ impl DriveClient {
             };
 
             Ok(bytes)
-        }).await.unwrap_or_else(|e| Err(DriveError::ShareError(anyhow::Error::new(e))))
-        .map_err(|e| e)?;
+        }).await.map_err(|e| DriveError::ShareError(anyhow::Error::new(e)))?;
 
+        let bytes = bytes?;
         let response = match Share::decode(&*bytes) {
             Ok(value) => value,
             Err(error) => return Err(DriveError::ProtobufError(error.into())),
         };
 
         Ok(response)
+    }
+
+    pub async fn get_folder_children(&self, node_identity: NodeIdentity) -> Result<Vec<NodeType>, DriveError> {
+        let handle = self.handle;
+        let token = self.session.cancellation_token().handle();
+        let identity_vec = node_identity.encode_to_vec();
+
+        let bytes = tokio::task::spawn_blocking(move || {
+            let identity = ByteArray::from_slice(&identity_vec);
+            let result = drive::raw::drive_client_get_folder_children(
+                handle, 
+                identity, 
+                token
+            ).map_err(|e| DriveError::NodeError(anyhow::anyhow!(e)))?;
+
+            if result.is_empty() {
+                return Err(DriveError::EmptyByteArray);
+            }
+
+            let bytes = unsafe { result.as_slice().to_vec() };
+            Ok(bytes)
+        }).await.map_err(|e| DriveError::NodeError(anyhow::anyhow!(e)))?;
+
+        let bytes = bytes?;
+       
+        let node_list = NodeTypeList::decode(&*bytes)
+            .map_err(|e| DriveError::ProtobufError(e.into()))?;
+
+        Ok(node_list.nodes)
     }
 
     /// Manually frees up the Proton Drive client handles in memory

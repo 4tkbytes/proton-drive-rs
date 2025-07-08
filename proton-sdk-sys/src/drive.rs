@@ -32,7 +32,7 @@ impl From<isize> for DriveClientHandle {
 
 /// Raw FFI functions for Drive client management
 pub mod raw {
-    use crate::{cancellation::CancellationTokenHandle, data::{AsyncCallback}};
+    use crate::{cancellation::CancellationTokenHandle, data::AsyncCallback, protobufs::NodeIdentity};
 
     use super::*;
 
@@ -155,6 +155,9 @@ pub mod raw {
     /// # Parameters
     /// * `client_handle` - Handle to the Drive client
     /// * `cancellation_token` - Handle to the cancellation token
+    /// 
+    /// # Returns
+    /// Returns a serialised VolumeResponse as a ByteArray
     pub fn drive_client_get_volumes(
         client_handle: DriveClientHandle,
         cancellation_token: CancellationTokenHandle,
@@ -187,6 +190,26 @@ pub mod raw {
             = sdk.sdk_library.get(b"drive_client_get_shares")?;
 
             Ok(get_shares_fn(client_handle.raw(), volume_metadata, cancellation_token.raw()))
+        }
+    }
+
+    pub fn drive_client_get_folder_children(
+        client_handle: DriveClientHandle,
+        node_identity: ByteArray,
+        cancellation_token: CancellationTokenHandle,
+    ) -> anyhow::Result<ByteArray> {
+        unsafe {
+            let sdk = ProtonSDKLib::instance()?;
+
+            let get_children_fn: libloading::Symbol<
+                unsafe extern "C" fn(isize, ByteArray, isize) -> ByteArray
+            > = sdk.sdk_library.get(b"drive_client_get_folder_children")?;
+
+            Ok(get_children_fn(
+                client_handle.raw(),
+                node_identity,
+                cancellation_token.raw(),
+            ))
         }
     }
 }

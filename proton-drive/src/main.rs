@@ -1,6 +1,7 @@
+use async_recursion::async_recursion;
 use log::*;
 use proton_sdk_rs::{
-    drive::DriveClientBuilder, observability::OptionalObservability, sessions::{SessionBuilder, SessionPlatform}, AddressKeyRegistrationRequest, ClientId, NodeIdentity, ProtonDriveClientCreateRequest, VolumeMetadata
+    drive::{DriveClient, DriveClientBuilder}, observability::OptionalObservability, sessions::{SessionBuilder, SessionPlatform}, utils, AddressKeyRegistrationRequest, ClientId, NodeIdentity, ProtonDriveClientCreateRequest, VolumeMetadata
 };
 use tokio::time::timeout;
 use std::{
@@ -147,13 +148,64 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let share = client.get_shares(main_volume).await?;
 
-    log::info!("Share information: {:#?}", share);
-    // let children = client.get_folder_children(NodeIdentity {share_id: share.id(), volume: main_volume, root_node: share.root_node()})
-    // Note: root_node changes with the further children there is
+    log::info!("Share information: {:?}", share);
 
-    // fn get_folder_children_recursive(NodeIdentity {
+    let list = recursive_list_file_root(&client, NodeIdentity { 
+        node_id: share.root_node_id.clone(), 
+        share_id: share.share_id.clone(), 
+        volume_id: main_volume.volume_id.clone()
+    }, "".to_string()).await?;
 
-    // })
+    for item in list {
+        log::info!("{}", item)
+    }
 
     Ok(())
+}
+
+#[async_recursion]
+async fn recursive_list_file_root(
+    client: &DriveClient,
+    identity: NodeIdentity,
+    parent_folder: String,
+) -> anyhow::Result<Vec<String>> {
+    let mut files = Vec::new();
+
+    let children = client.get_folder_children(identity.clone()).await?;
+
+    for child in children {
+        let (is_folder, folder) = utils::node_is_folder(child.clone());
+        if is_folder {
+            if let Some(folder) = folder {
+                let new_identity = NodeIdentity {
+                    node_id: folder.node_identity.as_ref().and_then(|ni| ni.node_id.clone()),
+                    share_id: folder.node_identity.as_ref().and_then(|ni| ni.share_id.clone()).or(identity.share_id.clone()),
+                    volume_id: folder.node_identity.as_ref().and_then(|ni| ni.volume_id.clone()).or(identity.volume_id.clone()),
+                };
+                let folder_name = folder.name.clone();
+                let new_parent = if parent_folder.is_empty() {
+                    folder_name
+                } else {
+                    format!("{}/{}", parent_folder, folder_name)
+                };
+                // Recurse into the folder
+                let mut sub_files = recursive_list_file_root(client, new_identity, new_parent).await?;
+                files.append(&mut sub_files);
+            }
+        } else {
+            let (is_file, file) = utils::node_is_file(child);
+            if is_file {
+                if let Some(file) = file {
+                    let file_name = if parent_folder.is_empty() {
+                        file.name.clone()
+                    } else {
+                        format!("{}/{}", parent_folder, file.name)
+                    };
+                    files.push(file_name);
+                }
+            }
+        }
+    }
+
+    Ok(files)
 }
