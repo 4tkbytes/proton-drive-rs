@@ -37,16 +37,19 @@ pub enum SessionError {
 pub type RequestResponseCallback = Box<dyn Fn(&[u8]) + Send + Sync>;
 pub type SecretRequestedCallback = Box<dyn Fn() -> bool + Send + Sync>;
 pub type TokensRefreshedCallback = Box<dyn Fn(&[u8]) + Send + Sync>;
+pub type TwoFactorRequestedCallbackRust = Box<dyn Fn(&[u8]) -> Option<proton_sdk_sys::protobufs::StringResponse> + Send + Sync>;
 
 pub struct SessionCallbacks {
     pub request_response: Option<RequestResponseCallback>,
     pub secret_requested: Option<SecretRequestedCallback>,
+    pub two_factor_requested: Option<TwoFactorRequestedCallbackRust>,
     pub tokens_refreshed: Option<TokensRefreshedCallback>,
 }
 
 struct CallbackData {
     request_response: Option<RequestResponseCallback>,
     secret_requested: Option<SecretRequestedCallback>,
+    two_factor_requested: Option<TwoFactorRequestedCallbackRust>,
     tokens_refreshed: Option<TokensRefreshedCallback>,
     completion_sender: Arc<
         std::sync::Mutex<Option<tokio::sync::oneshot::Sender<Result<SessionHandle, SessionError>>>>,
@@ -57,7 +60,11 @@ impl Default for SessionCallbacks {
     fn default() -> Self {
         Self {
             request_response: None,
-            secret_requested: None,
+            secret_requested: Some(Box::new(|| {
+                log::debug!("Session requested");
+                true
+            })),
+            two_factor_requested: None,
             tokens_refreshed: None,
         }
     }
@@ -166,6 +173,7 @@ impl SessionBuilder {
         let request = SessionBeginRequest {
             username: username,
             password: password,
+            two_factor_code: None,
             options: Some(ProtonClientOptions::default()),
         };
 
@@ -201,9 +209,9 @@ impl SessionBuilder {
 
     pub fn with_rclone_app_version_spoof(mut self) -> Self {
         if let Some(ref mut options) = self.request.options {
-            options.app_version = "macos-drive@1.0.0-alpha.1+rclone".to_string();
+            options.app_version = "macos-drive@1.0.0-alpha.1+proton-sdk-sys".to_string();
         }
-        debug!("App version: macos-drive@1.0.0-alpha.1+rclone");
+        debug!("App version: macos-drive@1.0.0-alpha.1+proton-sdk-sys");
         self
     }
 
@@ -222,6 +230,15 @@ impl SessionBuilder {
         F: Fn() -> bool + Send + Sync + 'static,
     {
         self.callbacks.secret_requested = Some(Box::new(callback));
+        self
+    }
+
+    /// Sets two factor requested callback
+    pub fn with_two_factor_requested_callback<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(&[u8]) -> Option<proton_sdk_sys::protobufs::StringResponse> + Send + Sync + 'static,
+    {
+        self.callbacks.two_factor_requested = Some(Box::new(callback));
         self
     }
 
@@ -258,15 +275,19 @@ impl SessionBuilder {
         let callback_data = Box::new(CallbackData {
             request_response: self.callbacks.request_response,
             secret_requested: self.callbacks.secret_requested,
+            two_factor_requested: self.callbacks.two_factor_requested,
             tokens_refreshed: self.callbacks.tokens_refreshed,
             completion_sender: tx.clone(),
         });
-
         let callback_ptr = callback_data.as_ref() as *const CallbackData as *const c_void;
 
         // creating c callbacks
         let request_callback = Callback::new(callback_ptr, Some(request_response_c_callback));
         let secret_callback = BooleanCallback::new(callback_ptr, Some(secret_requested_c_callback));
+        let two_factor_callback = proton_sdk_sys::data::TwoFactorRequestedCallback::new(
+            callback_ptr,
+            Some(two_factor_requested_c_callback),
+        );
         let tokens_callback = Callback::new(callback_ptr, Some(tokens_refreshed_c_callback));
 
         let cancellation_token = CancellationToken::new().map_err(|e| SessionError::SdkError(e))?;
@@ -351,6 +372,7 @@ impl SessionBuilder {
                 proto_buf.as_byte_array(),
                 request_callback,
                 secret_callback,
+                two_factor_callback,
                 tokens_callback,
                 async_callback,
             )?;
@@ -382,6 +404,7 @@ impl SessionBuilder {
         let callback_data = Box::new(CallbackData {
             request_response: callbacks.request_response,
             secret_requested: callbacks.secret_requested,
+            two_factor_requested: callbacks.two_factor_requested,
             tokens_refreshed: callbacks.tokens_refreshed,
             completion_sender: tx,
         });
@@ -430,6 +453,7 @@ impl SessionBuilder {
             Some(Box::new(CallbackData {
                 request_response: None,
                 secret_requested: None,
+                two_factor_requested: None,
                 tokens_refreshed: Some(callback),
                 completion_sender: Arc::new(std::sync::Mutex::new(None)),
             }))
@@ -587,11 +611,49 @@ extern "C" fn tokens_refreshed_c_callback(state: *const c_void, data: ByteArray)
     }
 }
 
+#[no_mangle]
+pub extern "C" fn proton_sdk_free(ptr: *mut u8) {
+    if !ptr.is_null() {
+        unsafe { Box::from_raw(ptr); }
+    }
+}
+
+extern "C" fn two_factor_requested_c_callback(
+    state: *const c_void,
+    context: proton_sdk_sys::data::ByteArray,
+    out_code: *mut proton_sdk_sys::data::ByteArray,
+) -> bool {
+    if !state.is_null() {
+        unsafe {
+            let callback_data = &*(state as *const CallbackData);
+            if let Some(ref callback) = callback_data.two_factor_requested {
+                let input = context.as_slice();
+                if let Some(response) = callback(input) {
+                    if !out_code.is_null() {
+                        if let Ok(proto_buf) = response.to_proto_buffer() {
+                            let bytes = proto_buf.as_byte_array();
+                            let vec = unsafe { std::slice::from_raw_parts(bytes.pointer, bytes.length).to_vec() };
+                            let boxed = vec.into_boxed_slice();
+                            let ptr = Box::into_raw(boxed) as *const u8;
+                            *out_code = proton_sdk_sys::data::ByteArray {
+                                pointer: ptr,
+                                length: bytes.length,
+                            };
+                        }
+                    }
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 pub enum SessionPlatform {
     Windows,
-    macOS,
+    MacOs,
     Android,
-    iOS,
+    Ios,
     Linux,
 }
 
@@ -599,9 +661,9 @@ impl fmt::Display for SessionPlatform {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SessionPlatform::Windows => write!(f, "windows"),
-            SessionPlatform::macOS => write!(f, "macos"),
+            SessionPlatform::MacOs => write!(f, "macos"),
             SessionPlatform::Android => write!(f, "android"),
-            SessionPlatform::iOS => write!(f, "ios"),
+            SessionPlatform::Ios => write!(f, "ios"),
             SessionPlatform::Linux => write!(f, "linux"),
         }
     }

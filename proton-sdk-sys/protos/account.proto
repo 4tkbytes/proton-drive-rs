@@ -62,7 +62,8 @@ message ProtonClientOptions {
 message SessionBeginRequest {
     string username = 1;
     string password = 2;
-    optional ProtonClientOptions options = 3;
+    optional string two_factor_code = 3;
+    optional ProtonClientOptions options = 4;
 }
 
 message SessionResumeRequest {

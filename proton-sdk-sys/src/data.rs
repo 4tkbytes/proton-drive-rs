@@ -144,3 +144,27 @@ impl BooleanCallback {
         }
     }
 }
+
+#[repr(C)]
+pub struct TwoFactorRequestedCallback {
+    pub state: *const c_void,
+    pub callback: Option<extern "C" fn(*const c_void, ByteArray, *mut ByteArray) -> bool>,
+}
+
+impl TwoFactorRequestedCallback {
+    /// Create a new TwoFactorRequestedCallback
+    pub fn new(
+        state: *const c_void,
+        callback: Option<extern "C" fn(*const c_void, ByteArray, *mut ByteArray) -> bool>,
+    ) -> Self {
+        Self { state, callback }
+    }
+
+    /// Create an empty TwoFactorRequestedCallback
+    pub fn empty() -> Self {
+        Self {
+            state: std::ptr::null(),
+            callback: None,
+        }
+    }
+}

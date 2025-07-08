@@ -54,6 +54,7 @@ pub mod raw {
         request: ByteArray,
         request_response_callback: Callback,
         secret_requested_callback: BooleanCallback,
+        two_factor_requested_callback: TwoFactorRequestedCallback,
         tokens_refreshed_callback: Callback,
         async_callback: AsyncCallback,
     ) -> anyhow::Result<i32> {
@@ -65,6 +66,7 @@ pub mod raw {
                 ByteArray,
                 Callback,
                 BooleanCallback,
+                TwoFactorRequestedCallback,
                 Callback,
                 AsyncCallback,
             ) -> i32,
@@ -75,6 +77,7 @@ pub mod raw {
             request,
             request_response_callback,
             secret_requested_callback,
+            two_factor_requested_callback,
             tokens_refreshed_callback,
             async_callback,
         );

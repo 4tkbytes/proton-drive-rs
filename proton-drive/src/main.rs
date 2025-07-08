@@ -2,7 +2,7 @@ use async_recursion::async_recursion;
 use chrono::Utc;
 use log::*;
 use proton_sdk_rs::{
-    downloads::DownloaderBuilder, drive::{DriveClient, DriveClientBuilder}, observability::OptionalObservability, sessions::{SessionBuilder, SessionPlatform}, utils, AddressKeyRegistrationRequest, ClientId, FileDownloadRequest, NodeIdentity, OperationIdentifier, OperationType, ProtonDriveClientCreateRequest, RevisionMetadata, VolumeMetadata
+    downloads::DownloaderBuilder, drive::{DriveClient, DriveClientBuilder}, observability::OptionalObservability, sessions::{SessionBuilder, SessionPlatform}, utils, AddressKeyRegistrationRequest, ClientId, FileDownloadRequest, NodeIdentity, OperationIdentifier, OperationType, ProtonDriveClientCreateRequest, RevisionMetadata, ToByteArray, VolumeMetadata
 };
 use proton_sdk_sys::logger;
 use tokio::time::timeout;
@@ -13,7 +13,7 @@ use std::{
 };
 
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+async fn main() -> anyhow::Result<()> {
     if let Err(_) = dotenv::dotenv() {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -46,15 +46,21 @@ async fn main() -> Result<(), anyhow::Error> {
                 trace!("   Content (truncated): {}...", &data_str[..200]);
             }
         })
-        .with_secret_requested_callback(|| {
-            println!("Secret requested");
-            true
-        })
-        .with_tokens_refreshed_callback(|tokens| {
-            println!("Authentication tokens refreshed: {} bytes", tokens.len());
-            let tokens_str = String::from_utf8_lossy(tokens);
-            if tokens_str.is_ascii() && tokens_str.len() < 200 {
-                trace!("   Tokens: {}", tokens_str);
+        .with_two_factor_requested_callback(|_context| {
+            print!("Enter 2FA code: ");
+            io::stdout().flush().ok();
+            let mut code = String::new();
+            if io::stdin().read_line(&mut code).is_ok() {
+                let code = code.trim();
+                if !code.is_empty() {
+                    Some(proton_sdk_sys::protobufs::StringResponse {
+                        value: code.to_string(),
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
             }
         })
         .begin()
