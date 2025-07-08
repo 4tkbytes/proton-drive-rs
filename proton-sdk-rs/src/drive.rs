@@ -33,8 +33,8 @@ pub enum DriveError {
     #[error("Node operation failed with error: {0}")]
     NodeError(anyhow::Error),
 
-    #[error("The function returned an empty byte array")]
-    EmptyByteArray,
+    #[error("The function returned an empty byte array, expected: {0}")]
+    EmptyByteArray(String),
 
     #[error("Drive client creation failed with code: {0}")]
     CreationFailed(i32),
@@ -192,7 +192,7 @@ impl DriveClient {
                 .map_err(|e| DriveError::SdkError(e))?;
 
             if result.is_empty() {
-                return Err(DriveError::EmptyByteArray);
+                return Err(DriveError::EmptyByteArray(String::from("VolumesResponse")));
             }
 
             let bytes = unsafe {
@@ -225,7 +225,7 @@ impl DriveClient {
             ).map_err(|e| DriveError::ShareError(e))?;
 
             if result.is_empty() {
-                return Err(DriveError::EmptyByteArray);
+                return Err(DriveError::EmptyByteArray(String::from("Share")));
             }
 
             let bytes = unsafe {
@@ -258,7 +258,7 @@ impl DriveClient {
             ).map_err(|e| DriveError::NodeError(anyhow::anyhow!(e)))?;
 
             if result.is_empty() {
-                return Err(DriveError::EmptyByteArray);
+                return Err(DriveError::EmptyByteArray(String::from("NodeTypeList")));
             }
 
             let bytes = unsafe { result.as_slice().to_vec() };

@@ -4,6 +4,7 @@ use log::*;
 use proton_sdk_rs::{
     downloads::DownloaderBuilder, drive::{DriveClient, DriveClientBuilder}, observability::OptionalObservability, sessions::{SessionBuilder, SessionPlatform}, utils, AddressKeyRegistrationRequest, ClientId, FileDownloadRequest, NodeIdentity, OperationIdentifier, OperationType, ProtonDriveClientCreateRequest, RevisionMetadata, VolumeMetadata
 };
+use proton_sdk_sys::logger;
 use tokio::time::timeout;
 use uuid::Uuid;
 use std::{
@@ -47,11 +48,6 @@ async fn main() -> Result<(), anyhow::Error> {
         })
         .with_secret_requested_callback(|| {
             println!("Secret requested");
-            // io::stdout().flush().unwrap();
-            // let mut input = String::new();
-            // io::stdin().read_line(&mut input).unwrap();
-            // let result = input.trim().to_lowercase() == "y";
-            // trace!("   Secret callback returning: {}", result);
             true
         })
         .with_tokens_refreshed_callback(|tokens| {
