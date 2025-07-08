@@ -675,15 +675,25 @@ class BuildScript:
         # Copy protobuf files AFTER libraries are copied but BEFORE cargo tests
         self.copy_protobufs()
     
-        # Run cargo program once from the project root
-        print(f"{Colors.CYAN}Running cargo testing binary (proton-drive) from project root: {self.base_dir}{Colors.END}")
-        os.chdir(self.base_dir)
-        try:
-            self.run_command("cargo run -p proton-drive")
-            print(f"{Colors.GREEN}+ Tests completed for proton-drive{Colors.END}")
-        except subprocess.CalledProcessError as e:
-            print(f"{Colors.YELLOW}Warning: Tests failed for proton-drive: {e}{Colors.END}")
-            print(f"{Colors.YELLOW}Continuing with build process...{Colors.END}")
+        # Run cargo test for both proton-sdk-rs and proton-sdk-sys
+        rust_projects = [
+            ("proton-sdk-rs", "Rust workspace"),
+            ("proton-sdk-sys", "Native bindings")
+        ]
+        
+        for project_name, project_desc in rust_projects:
+            project_dir = self.base_dir / project_name
+            if project_dir.exists():
+                print(f"{Colors.CYAN}Running cargo testing binary (proton-drive) in {project_desc}: {project_dir}{Colors.END}")
+                os.chdir(project_dir)
+                try:
+                    self.run_command("cargo run -p proton-drive")
+                    print(f"{Colors.GREEN}+ Tests completed for {project_name}{Colors.END}")
+                except subprocess.CalledProcessError as e:
+                    print(f"{Colors.YELLOW}Warning: Tests failed for {project_name}: {e}{Colors.END}")
+                    print(f"{Colors.YELLOW}Continuing with build process...{Colors.END}")
+            else:
+                print(f"{Colors.YELLOW}Warning: {project_name} directory not found at {project_dir}, skipping cargo test{Colors.END}")
 
     def clean_all(self):
         """Clean all build artifacts and temporary directories"""
@@ -772,8 +782,9 @@ class BuildScript:
         all_steps = [
             ("clone", "Repository cloning", self.clone_repositories),
             ("crypto", "dotnet-crypto build", self.build_dotnet_crypto),
-            ("rust", "proton-sdk-rs build", self.build_proton_sdk_rs),
             ("protos", "Protobuf copying", self.copy_protobufs),
+            ("sdk", "Proton.SDK build", self.build_dll_only),
+            ("rust", "proton-sdk-rs build", self.build_proton_sdk_rs),
         ]
         
         try:
