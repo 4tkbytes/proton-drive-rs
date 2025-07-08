@@ -96,6 +96,17 @@ message SessionTokens {
     string refresh_token = 2;
 }
 
+message SessionInfo {
+    SessionId session_id = 1;
+    string username = 2;
+    UserId user_id = 3;
+    string access_token = 4;
+    string refresh_token = 5;
+    repeated string scopes = 6;
+    bool is_waiting_for_second_factor_code = 7;
+    PasswordMode password_mode = 8;
+}
+
 // Events
 
 message LogEvent {
