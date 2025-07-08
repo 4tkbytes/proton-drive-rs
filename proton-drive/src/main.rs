@@ -1,6 +1,6 @@
 use log::*;
 use proton_sdk_rs::{
-    drive::DriveClientBuilder, observability::OptionalObservability, sessions::{SessionBuilder, SessionPlatform}, AddressKeyRegistrationRequest, ClientId, ProtonDriveClientCreateRequest, VolumeMetadata
+    drive::DriveClientBuilder, observability::OptionalObservability, sessions::{SessionBuilder, SessionPlatform}, AddressKeyRegistrationRequest, ClientId, NodeIdentity, ProtonDriveClientCreateRequest, VolumeMetadata
 };
 use tokio::time::timeout;
 use std::{
@@ -142,6 +142,18 @@ async fn main() -> Result<(), anyhow::Error> {
     for volume in &volumes {
         println!("{:?}", volume);
     }
+
+    let main_volume = &volumes[0];
+
+    let share = client.get_shares(main_volume).await?;
+
+    log::info!("Share information: {:#?}", share);
+    // let children = client.get_folder_children(NodeIdentity {share_id: share.id(), volume: main_volume, root_node: share.root_node()})
+    // Note: root_node changes with the further children there is
+
+    // fn get_folder_children_recursive(NodeIdentity {
+
+    // })
 
     Ok(())
 }

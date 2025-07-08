@@ -35,6 +35,8 @@ impl ProtonSDKLib {
                 }
                 Err(e) => {
                     error!("Failed to initialise ProtonSDKLib: {}", e);
+                    log::info!("Attempting fallback of checking PROTON_SDK_LIB_DIR env");
+                    check_and_move_env();
                 }
             });
 
@@ -154,5 +156,48 @@ impl ProtonSDKLib {
         paths.push(PathBuf::from(format!("../target/release/{}", lib_name)));
 
         paths
+    }
+}
+
+fn check_and_move_env() {
+    use std::{env, fs, path::PathBuf};
+
+    let (_runtime_id, lib_name) = ProtonSDKLib::get_platform_info();
+
+    let lib_dir = match env::var("PROTON_SDK_LIB_DIR") {
+        Ok(val) => PathBuf::from(val),
+        Err(_) => {
+            warn!("PROTON_SDK_LIB_DIR is not set.");
+            return;
+        }
+    };
+
+    let lib_path = lib_dir.join(lib_name);
+    if !lib_path.exists() {
+        warn!(
+            "Library {} not found in PROTON_SDK_LIB_DIR: {}",
+            lib_name,
+            lib_dir.display()
+        );
+        return;
+    }
+
+    let dest_path = PathBuf::from(lib_name);
+    match fs::copy(&lib_path, &dest_path) {
+        Ok(_) => {
+            debug!(
+                "Copied SDK library from {} to {}",
+                lib_path.display(),
+                dest_path.display()
+            );
+        }
+        Err(e) => {
+            warn!(
+                "Failed to copy SDK library from {} to {}: {}",
+                lib_path.display(),
+                dest_path.display(),
+                e
+            );
+        }
     }
 }

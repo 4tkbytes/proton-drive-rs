@@ -149,6 +149,12 @@ pub mod raw {
         }
     }
 
+    /// Fetches the available volumes in the client, typically only returning
+    /// 1 volume but can change. 
+    /// 
+    /// # Parameters
+    /// * `client_handle` - Handle to the Drive client
+    /// * `cancellation_token` - Handle to the cancellation token
     pub fn drive_client_get_volumes(
         client_handle: DriveClientHandle,
         cancellation_token: CancellationTokenHandle,
@@ -161,6 +167,26 @@ pub mod raw {
             > = sdk.sdk_library.get(b"drive_client_get_volumes")?;
 
             Ok(get_volumes_fn(client_handle.raw(), cancellation_token.raw()))
+        }
+    }
+
+    // ByteArray drive_client_get_shares(
+    //     intptr_t client_handle,
+    //     ByteArray volume_metadata,
+    //     intptr_t cancellation_token
+    // );
+    pub fn drive_client_get_shares(
+        client_handle: DriveClientHandle,
+        volume_metadata: ByteArray,
+        cancellation_token: CancellationTokenHandle
+    ) -> anyhow::Result<ByteArray> {
+        unsafe {
+            let sdk = ProtonSDKLib::instance()?;
+
+            let get_shares_fn: libloading::Symbol<unsafe extern "C" fn(isize, ByteArray, isize) -> ByteArray>
+            = sdk.sdk_library.get(b"drive_client_get_shares")?;
+
+            Ok(get_shares_fn(client_handle.raw(), volume_metadata, cancellation_token.raw()))
         }
     }
 }

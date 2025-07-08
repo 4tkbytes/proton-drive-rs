@@ -2,8 +2,8 @@ use std::{ffi::c_void, fmt};
 
 use log::{debug, error, warn};
 use proton_sdk_sys::{
-    cancellation, data::{ByteArray}, drive::{self, DriveClientHandle}, observability::{self, ObservabilityHandle}, protobufs::{
-        NodeKeysRegistrationRequest, ProtonDriveClientCreateRequest, ShareKeyRegistrationRequest, ToByteArray, VolumeEventType, VolumeMetadata, VolumesResponse
+    cancellation, data::ByteArray, drive::{self, DriveClientHandle}, observability::{self, ObservabilityHandle}, protobufs::{
+        NodeKeysRegistrationRequest, ProtonDriveClientCreateRequest, Share, ShareKeyRegistrationRequest, ToByteArray, VolumeEventType, VolumeMetadata, VolumesResponse
     }, sessions::SessionHandle
 };
 
@@ -26,6 +26,9 @@ pub enum DriveError {
 
     #[error("Volume error: {0}")]
     VolumeError(anyhow::Error),
+
+    #[error("Volume error: {0}")]
+    ShareError(anyhow::Error),
 
     #[error("Drive client creation failed with code: {0}")]
     CreationFailed(i32),
@@ -196,6 +199,39 @@ impl DriveClient {
             };
 
         Ok(response.volumes)
+    }
+
+    pub async fn get_shares(&self, volume_metadata: &VolumeMetadata) -> Result<Share, DriveError> {
+        let handle = self.handle;
+        let token = self.session.cancellation_token().handle();
+        let metadata_vec = volume_metadata.encode_to_vec();
+
+        let bytes = tokio::task::spawn_blocking(move || {
+            let metadata = ByteArray::from_slice(&metadata_vec);
+            let result = drive::raw::drive_client_get_shares(
+                handle, 
+                metadata,
+                token
+            ).map_err(|e| DriveError::ShareError(e))?;
+
+            if result.is_empty() {
+                return Err(DriveError::ShareError(anyhow::anyhow!("get_shares returned an empty buffer")));
+            }
+
+            let bytes = unsafe {
+                result.as_slice().to_vec()
+            };
+
+            Ok(bytes)
+        }).await.unwrap_or_else(|e| Err(DriveError::ShareError(anyhow::Error::new(e))))
+        .map_err(|e| e)?;
+
+        let response = match Share::decode(&*bytes) {
+            Ok(value) => value,
+            Err(error) => return Err(DriveError::ProtobufError(error.into())),
+        };
+
+        Ok(response)
     }
 
     /// Manually frees up the Proton Drive client handles in memory
