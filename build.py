@@ -784,7 +784,7 @@ class BuildScript:
             ("crypto", "dotnet-crypto build", self.build_dotnet_crypto),
             ("protos", "Protobuf copying", self.copy_protobufs),
             ("sdk", "Proton.SDK build", self.build_dll_only),
-            ("rust", "proton-sdk-rs build", self.build_proton_sdk_rs),
+            # ("rust", "proton-sdk-rs build", self.build_proton_sdk_rs), rust will be done manually
         ]
         
         try:
