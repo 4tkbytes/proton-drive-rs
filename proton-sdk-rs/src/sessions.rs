@@ -235,6 +235,21 @@ impl SessionBuilder {
     }
 
     pub async fn begin(self) -> Result<Session, SessionError> {
+        let censor = |input: &String, censor: char| {
+            let mut temp = String::new();
+            for len in 0..input.len()-2 {
+                temp.push(censor);
+            }
+            temp
+        };
+
+        debug!("Creating session for user: {}", self.request.username);
+        debug!(
+            "Using credentials: username={}, password={}chars",
+            format!("{}{}{}", self.request.username.chars().next().unwrap(), censor(&self.request.username, '*'), self.request.username.chars().last().unwrap()),
+            self.request.password.len()
+        );
+
         let proto_buf = self.request.to_proto_buffer()?;
 
         let (tx, rx) = tokio::sync::oneshot::channel();

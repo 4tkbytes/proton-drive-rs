@@ -80,6 +80,11 @@ class BuildScript:
         self.required_tools = ['git', 'dotnet', 'cargo', 'rustc', 'go', 'gcc']
         self.optional_tools = []  # No optional tools required with integrated build system
         
+        # Set default DLLs location to {projectRoot}/native-libs
+        self.dlls_location = self.base_dir / "native-libs"
+        os.environ["PROTON_SDK_LIB_DIR"] = str(self.dlls_location)
+        print(f"{Colors.CYAN}Set PROTON_SDK_LIB_DIR to: {self.dlls_location}{Colors.END}")
+        
         print(f"{Colors.CYAN}Base directory set to: {self.base_dir}{Colors.END}")
         print(f"{Colors.CYAN}Local NuGet repository: {self.local_nuget_repo}{Colors.END}")
         print(f"{Colors.CYAN}Current working directory: {Path.cwd()}{Colors.END}")

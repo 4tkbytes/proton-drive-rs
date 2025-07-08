@@ -32,21 +32,6 @@ async fn main() -> Result<(), anyhow::Error> {
         env::var("PROTON_USERNAME").expect("You must provide a username in the .env file");
     let password =
         env::var("PROTON_PASSWORD").expect("You must provide a password in the .env file");
-    
-    let censor = |input: &String, censor: char| {
-        let mut temp = String::new();
-        for len in 0..input.len()-2 {
-            temp.push(censor);
-        }
-        temp
-    };
-
-    debug!("Creating session for user: {}", username);
-    debug!(
-        "Using credentials: username={}, password={}chars",
-        format!("{}{}{}", username.chars().next().unwrap(), censor(&username, '*'), username.chars().last().unwrap()),
-        password.len()
-    );
 
     let session_result = SessionBuilder::new(username, password)
         // .with_app_version(SessionPlatform::Windows, "proton-drive-rs", "1.0.0")
