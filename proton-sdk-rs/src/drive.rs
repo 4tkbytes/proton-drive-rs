@@ -249,7 +249,7 @@ impl DriveClient {
         let token = self.session.cancellation_token().handle();
         let identity_vec = node_identity.encode_to_vec();
 
-        let bytes = tokio::task::spawn_blocking(move || {
+        let bytes: Result<Vec<u8>, DriveError> = tokio::task::spawn_blocking(move || {
             let identity = ByteArray::from_slice(&identity_vec);
             let result = drive::raw::drive_client_get_folder_children(
                 handle, 
@@ -257,9 +257,9 @@ impl DriveClient {
                 token
             ).map_err(|e| DriveError::NodeError(anyhow::anyhow!(e)))?;
 
-            if result.is_empty() {
-                return Err(DriveError::EmptyByteArray(String::from("NodeTypeList")));
-            }
+            // if result.is_empty() {
+            //     return Err(DriveError::EmptyByteArray(String::from("NodeTypeList")));
+            // }
 
             let bytes = unsafe { result.as_slice().to_vec() };
             Ok(bytes)

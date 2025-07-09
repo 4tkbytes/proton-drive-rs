@@ -13,7 +13,7 @@ use proton_sdk_sys::{
     },
     sessions::{self, SessionHandle},
 };
-
+use proton_sdk_sys::protobufs::StringResponse;
 use crate::cancellation::CancellationToken;
 
 #[derive(Debug, thiserror::Error)]
@@ -37,7 +37,9 @@ pub enum SessionError {
 pub type RequestResponseCallback = Box<dyn Fn(&[u8]) + Send + Sync>;
 pub type SecretRequestedCallback = Box<dyn Fn() -> bool + Send + Sync>;
 pub type TokensRefreshedCallback = Box<dyn Fn(&[u8]) + Send + Sync>;
-pub type TwoFactorRequestedCallbackRust = Box<dyn Fn(&[u8]) -> Option<proton_sdk_sys::protobufs::StringResponse> + Send + Sync>;
+pub type TwoFactorRequestedCallbackRust = Box<dyn Fn(&[u8]) -> (
+    Option<StringResponse>, Option<StringResponse>
+) + Send + Sync>;
 
 pub struct SessionCallbacks {
     pub request_response: Option<RequestResponseCallback>,
@@ -236,7 +238,7 @@ impl SessionBuilder {
     /// Sets two factor requested callback
     pub fn with_two_factor_requested_callback<F>(mut self, callback: F) -> Self
     where
-        F: Fn(&[u8]) -> Option<proton_sdk_sys::protobufs::StringResponse> + Send + Sync + 'static,
+        F: Fn(&[u8]) -> (Option<StringResponse>, Option<StringResponse>) + Send + Sync + 'static,
     {
         self.callbacks.two_factor_requested = Some(Box::new(callback));
         self
@@ -324,6 +326,8 @@ impl SessionBuilder {
                         }
                     }
                 }
+            } else {
+                error!("Callback state is null!");
             }
         }
 
@@ -620,29 +624,53 @@ pub extern "C" fn proton_sdk_free(ptr: *mut u8) {
 
 extern "C" fn two_factor_requested_c_callback(
     state: *const c_void,
-    context: proton_sdk_sys::data::ByteArray,
-    out_code: *mut proton_sdk_sys::data::ByteArray,
+    context: ByteArray,
+    out_code: *mut ByteArray,
+    data_pass: *mut ByteArray,
 ) -> bool {
     if !state.is_null() {
         unsafe {
             let callback_data = &*(state as *const CallbackData);
             if let Some(ref callback) = callback_data.two_factor_requested {
                 let input = context.as_slice();
-                if let Some(response) = callback(input) {
-                    if !out_code.is_null() {
-                        if let Ok(proto_buf) = response.to_proto_buffer() {
+                let (code_opt, pass_opt) = callback(input);
+                let mut any_set = false;
+
+                if !out_code.is_null() {
+                    if let Some(code) = code_opt {
+                        if let Ok(proto_buf) = code.to_proto_buffer() {
                             let bytes = proto_buf.as_byte_array();
-                            let vec = unsafe { std::slice::from_raw_parts(bytes.pointer, bytes.length).to_vec() };
+                            let vec = std::slice::from_raw_parts(bytes.pointer, bytes.length).to_vec();
                             let boxed = vec.into_boxed_slice();
                             let ptr = Box::into_raw(boxed) as *const u8;
-                            *out_code = proton_sdk_sys::data::ByteArray {
+                            *out_code = ByteArray {
                                 pointer: ptr,
                                 length: bytes.length,
                             };
+                            trace!("Allocated out_code at {:p} ({} bytes)", ptr, bytes.length);
+                            any_set = true;
                         }
                     }
-                    return true;
                 }
+
+                if !data_pass.is_null() {
+                    if let Some(pass) = pass_opt {
+                        if let Ok(proto_buf) = pass.to_proto_buffer() {
+                            let bytes = proto_buf.as_byte_array();
+                            let vec = std::slice::from_raw_parts(bytes.pointer, bytes.length).to_vec();
+                            let boxed = vec.into_boxed_slice();
+                            let ptr = Box::into_raw(boxed) as *const u8;
+                            *data_pass = ByteArray {
+                                pointer: ptr,
+                                length: bytes.length,
+                            };
+                            trace!("Allocated data_pass at {:p} ({} bytes)", ptr, bytes.length);
+                            any_set = true;
+                        }
+                    }
+                }
+
+                return any_set;
             }
         }
     }

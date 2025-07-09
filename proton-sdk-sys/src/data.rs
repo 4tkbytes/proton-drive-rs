@@ -146,16 +146,26 @@ impl BooleanCallback {
 }
 
 #[repr(C)]
+/// The callback looks confusing, but it really is not:
+/// 
+/// # Callback Params
+/// * The first `ByteArray` is for a 2 factor auth code.
+/// * The second `ByteArray` is for an optional data password.
+/// It's recommended to set the optional data password to the users password
+/// if they do not have one
+/// 
+/// Note: The `ByteArray` of the out params are both `StringResponse` types,
+/// which contain a value of a string. 
 pub struct TwoFactorRequestedCallback {
     pub state: *const c_void,
-    pub callback: Option<extern "C" fn(*const c_void, ByteArray, *mut ByteArray) -> bool>,
+    pub callback: Option<extern "C" fn(*const c_void, ByteArray, *mut ByteArray, *mut ByteArray) -> bool>,
 }
 
 impl TwoFactorRequestedCallback {
     /// Create a new TwoFactorRequestedCallback
     pub fn new(
         state: *const c_void,
-        callback: Option<extern "C" fn(*const c_void, ByteArray, *mut ByteArray) -> bool>,
+        callback: Option<extern "C" fn(*const c_void, ByteArray, *mut ByteArray, *mut ByteArray) -> bool>,
     ) -> Self {
         Self { state, callback }
     }

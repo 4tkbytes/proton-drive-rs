@@ -1,3 +1,5 @@
+use proton_sdk_sys::data::Callback;
+use std::fs::OpenOptions;
 use async_recursion::async_recursion;
 use chrono::Utc;
 use log::*;
@@ -11,9 +13,11 @@ use std::{
     env,
     io::{self, Write}, thread, time::Duration,
 };
+use proton_sdk_sys::prost::encoding::check_wire_type;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+
     if let Err(_) = dotenv::dotenv() {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -29,10 +33,39 @@ async fn main() -> anyhow::Result<()> {
         warn!("No RUST_LOG environment variable found. Setting default log level.");
     }
 
-    let username =
-        env::var("PROTON_USERNAME").expect("You must provide a username in the .env file");
-    let password =
-        env::var("PROTON_PASSWORD").expect("You must provide a password in the .env file");
+    let username = env::var("PROTON_USERNAME").unwrap_or_else(|_| {
+        print!("Enter your Proton username: ");
+        io::stdout().flush().unwrap();
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).unwrap();
+        let username = input.trim().to_string();
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(".env")
+            .unwrap();
+        writeln!(file, "PROTON_USERNAME={}", username).unwrap();
+
+        username
+    });
+
+    let password = env::var("PROTON_PASSWORD").unwrap_or_else(|_| {
+        print!("Enter your Proton password: ");
+        io::stdout().flush().unwrap();
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).unwrap();
+        let password = input.trim().to_string();
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(".env")
+            .unwrap();
+        writeln!(file, "PROTON_PASSWORD={}", password).unwrap();
+
+        password
+    });
 
     let session_result = SessionBuilder::new(username, password)
         // .with_app_version(SessionPlatform::Windows, "proton-drive-rs", "1.0.0")
@@ -50,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
             print!("Enter 2FA code: ");
             io::stdout().flush().ok();
             let mut code = String::new();
-            if io::stdin().read_line(&mut code).is_ok() {
+            let code_opt = if io::stdin().read_line(&mut code).is_ok() {
                 let code = code.trim();
                 if !code.is_empty() {
                     Some(proton_sdk_sys::protobufs::StringResponse {
@@ -61,7 +94,46 @@ async fn main() -> anyhow::Result<()> {
                 }
             } else {
                 None
-            }
+            };
+
+            let data_pass_opt = match env::var("NO_DATA_PASS").as_deref() {
+                Ok("true") => {
+                    warn!("Data password not provided, setting as users password");
+                    Some(proton_sdk_sys::protobufs::StringResponse {
+                        value: env::var("PROTON_PASSWORD").expect("No password provided \
+                        even though it should be there???"),
+                    })
+                }
+                _ => {
+                    print!("Enter data pass (if any, or leave blank): ");
+                    io::stdout().flush().ok();
+                    let mut data_pass = String::new();
+                    let data_pass_result = if io::stdin().read_line(&mut data_pass).is_ok() {
+                        let data_pass = data_pass.trim();
+                        let mut file = OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(".env")
+                            .unwrap();
+                        if !data_pass.is_empty() {
+                            writeln!(file, "NO_DATA_PASS=false").ok();
+                            Some(proton_sdk_sys::protobufs::StringResponse {
+                                value: data_pass.to_string(),
+                            })
+                        } else {
+                            writeln!(file, "NO_DATA_PASS=true").ok();
+                            Some(proton_sdk_sys::protobufs::StringResponse {
+                                value: env::var("PROTON_PASSWORD").expect("tf y no pass???"),
+                            })
+                        }
+                    } else {
+                        None
+                    };
+                    data_pass_result
+                }
+            };
+
+            (code_opt, data_pass_opt)
         })
         .begin()
         .await;
@@ -144,63 +216,59 @@ async fn main() -> anyhow::Result<()> {
         volume_id: main_volume.volume_id.clone()
     };
 
-    let list = recursive_list_file_root(&client, &identity, "".to_string()).await?;
-
-    for item in list {
-        log::info!("{}", item)
-    }
-    let downloader = DownloaderBuilder::new(&client).build().await?;
-
-    let children = client.get_folder_children(identity.clone()).await?;
-    for child in children {
-        let (is_file, file_node) = utils::node_is_file(child);
-        if is_file && file_node.as_ref().unwrap().name == "BadApple.mp4" {
-            let file = file_node.as_ref().unwrap();
-            let mut file_identity = file.node_identity.clone();
-            if let Some(ref mut fi) = file_identity {
-                if fi.share_id.is_none() {
-                    log::warn!("Missing share id, adding...");
-                    fi.share_id = identity.share_id.clone();
-                }
-                if fi.volume_id.is_none() {
-                    log::warn!("Missing volume id, adding...");
-                    fi.volume_id = identity.volume_id.clone();
-                }
-            };
-            let revision_info = file.active_revision.as_ref().unwrap();
-            let revision = RevisionMetadata { 
-                revision_id: revision_info.revision_id.clone(),
-                state: revision_info.state,
-                manifest_signature: revision_info.manifest_signature.clone(), 
-                signature_email_address: revision_info.signature_email_address.clone(), 
-                samples_sha256_digests: revision_info.samples_sha256_digests.clone()
-            };
-            let operation = OperationIdentifier { 
-                r#type: OperationType::Download.into(),
-                identifier: Uuid::new_v4().to_string(), 
-                timestamp: Utc::now().to_rfc3339()
-            };
-            trace!("share id: {:?}", file.node_identity.as_ref().unwrap().share_id);
-            trace!("volume id: {:?}", file.node_identity.as_ref().unwrap().volume_id);
-            trace!("node id: {:?}", file.node_identity.as_ref().unwrap().node_id);
-            trace!("global share id: {:?}", share.share_id);
-
-            let request = FileDownloadRequest { 
-                file_identity, 
-                revision_metadata: Some(revision), 
-                target_file_path: String::from("C:/Users/thrib/Downloads/BadApple.mp4"), 
-                operation_id: Some(operation)
-            };
-            
-            let status = downloader.download_file(
-                request,
-                 Some(|progress| println!("Progress: {:.1}%", progress * 100.0)),
-                &client.session().cancellation_token()
-                )
-                .await?;
-            trace!("downloader status: {:?}", status);
-        }
-    }
+    recursive_list_file_root(&client, &identity, "".to_string()).await?;
+    // let downloader = DownloaderBuilder::new(&client).build().await?;
+    //
+    // let children = client.get_folder_children(identity.clone()).await?;
+    // for child in children {
+    //     let (is_file, file_node) = utils::node_is_file(child);
+    //     if is_file && file_node.as_ref().unwrap().name == "BadApple.mp4" {
+    //         let file = file_node.as_ref().unwrap();
+    //         let mut file_identity = file.node_identity.clone();
+    //         if let Some(ref mut fi) = file_identity {
+    //             if fi.share_id.is_none() {
+    //                 log::warn!("Missing share id, adding...");
+    //                 fi.share_id = identity.share_id.clone();
+    //             }
+    //             if fi.volume_id.is_none() {
+    //                 log::warn!("Missing volume id, adding...");
+    //                 fi.volume_id = identity.volume_id.clone();
+    //             }
+    //         };
+    //         let revision_info = file.active_revision.as_ref().unwrap();
+    //         let revision = RevisionMetadata {
+    //             revision_id: revision_info.revision_id.clone(),
+    //             state: revision_info.state,
+    //             manifest_signature: revision_info.manifest_signature.clone(),
+    //             signature_email_address: revision_info.signature_email_address.clone(),
+    //             samples_sha256_digests: revision_info.samples_sha256_digests.clone()
+    //         };
+    //         let operation = OperationIdentifier {
+    //             r#type: OperationType::Download.into(),
+    //             identifier: Uuid::new_v4().to_string(),
+    //             timestamp: Utc::now().to_rfc3339()
+    //         };
+    //         trace!("share id: {:?}", file.node_identity.as_ref().unwrap().share_id);
+    //         trace!("volume id: {:?}", file.node_identity.as_ref().unwrap().volume_id);
+    //         trace!("node id: {:?}", file.node_identity.as_ref().unwrap().node_id);
+    //         trace!("global share id: {:?}", share.share_id);
+    //
+    //         let request = FileDownloadRequest {
+    //             file_identity,
+    //             revision_metadata: Some(revision),
+    //             target_file_path: String::from("C:/Users/thrib/Downloads/BadApple.mp4"),
+    //             operation_id: Some(operation)
+    //         };
+    //
+    //         let status = downloader.download_file(
+    //             request,
+    //              Some(|progress| println!("Progress: {:.1}%", progress * 100.0)),
+    //             &client.session().cancellation_token()
+    //             )
+    //             .await?;
+    //         trace!("downloader status: {:?}", status);
+    //     }
+    // }
 
     Ok(())
 }
@@ -210,28 +278,34 @@ async fn recursive_list_file_root(
     client: &DriveClient,
     identity: &NodeIdentity,
     parent_folder: String,
-) -> anyhow::Result<Vec<String>> {
-    let mut files = Vec::new();
-
+) -> anyhow::Result<()> {
     let children = client.get_folder_children(identity.clone()).await?;
 
     for child in children {
         let (is_folder, folder) = utils::node_is_folder(child.clone());
         if is_folder {
             if let Some(folder) = folder {
-                let new_identity = NodeIdentity {
-                    node_id: folder.node_identity.as_ref().and_then(|ni| ni.node_id.clone()),
-                    share_id: folder.node_identity.as_ref().and_then(|ni| ni.share_id.clone()).or(identity.share_id.clone()),
-                    volume_id: folder.node_identity.as_ref().and_then(|ni| ni.volume_id.clone()).or(identity.volume_id.clone()),
-                };
-                let folder_name = folder.name.clone();
-                let new_parent = if parent_folder.is_empty() {
-                    folder_name
+                let folder_name = if parent_folder.is_empty() {
+                    folder.name.clone()
                 } else {
-                    format!("{}/{}", parent_folder, folder_name)
+                    format!("{}/{}", parent_folder, folder.name)
                 };
-                let mut sub_files = recursive_list_file_root(client, &new_identity, new_parent).await?;
-                files.append(&mut sub_files);
+                println!("{}", folder_name);
+
+                let new_identity = {
+                    let node_id = folder.node_identity.as_ref()
+                        .and_then(|ni| ni.node_id.clone())
+                        .or_else(|| identity.node_id.clone());
+                    let share_id = folder.node_identity.as_ref()
+                        .and_then(|ni| ni.share_id.clone())
+                        .or_else(|| identity.share_id.clone());
+                    let volume_id = folder.node_identity.as_ref()
+                        .and_then(|ni| ni.volume_id.clone())
+                        .or_else(|| identity.volume_id.clone());
+                    NodeIdentity { node_id, share_id, volume_id }
+                };
+
+                recursive_list_file_root(client, &new_identity, folder_name).await?;
             }
         } else {
             let (is_file, file) = utils::node_is_file(child);
@@ -242,11 +316,11 @@ async fn recursive_list_file_root(
                     } else {
                         format!("{}/{}", parent_folder, file.name)
                     };
-                    files.push(file_name);
+                    println!("{}", file_name);
                 }
             }
         }
     }
 
-    Ok(files)
+    Ok(())
 }
