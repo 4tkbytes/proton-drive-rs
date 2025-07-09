@@ -77,6 +77,7 @@ pub mod raw {
     /// Frees a cancellation token source (raw FFI)
     /// Note: Does nothing if handle is CancellationToken::NONE
     pub fn free(handle: isize) -> anyhow::Result<()> {
+        // Don't try to free the "None" token
         if handle == -1 {
             return Ok(());
         }

@@ -2,13 +2,14 @@ use async_recursion::async_recursion;
 use chrono::Utc;
 use log::*;
 use proton_sdk_rs::{
-    downloads::DownloaderBuilder, drive::{DriveClient, DriveClientBuilder}, observability::OptionalObservability, sessions::{Session, SessionBuilder, SessionCallbacks, SessionPlatform}, utils, AddressKeyRegistrationRequest, ClientId, FileDownloadRequest, FromByteArray, NodeIdentity, OperationIdentifier, OperationType, ProtonClientOptions, ProtonDriveClientCreateRequest, RevisionMetadata, SessionInfo, SessionRenewRequest, SessionResumeRequest, SessionTokens, ToByteArray, VolumeMetadata
+    downloads::DownloaderBuilder, drive::{DriveClient, DriveClientBuilder}, observability::OptionalObservability, sessions::{SessionBuilder, SessionPlatform}, utils, AddressKeyRegistrationRequest, ClientId, FileDownloadRequest, NodeIdentity, OperationIdentifier, OperationType, ProtonDriveClientCreateRequest, RevisionMetadata, ToByteArray, VolumeMetadata
 };
-use proton_sdk_sys::{logger, prost::bytes::buf};
+use proton_sdk_sys::logger;
 use tokio::time::timeout;
 use uuid::Uuid;
 use std::{
-    env, fs::File, io::{self, Read, Write}, thread, time::Duration
+    env,
+    io::{self, Write}, thread, time::Duration,
 };
 
 #[tokio::main]
@@ -33,111 +34,7 @@ async fn main() -> anyhow::Result<()> {
     let password =
         env::var("PROTON_PASSWORD").expect("You must provide a password in the .env file");
 
-    let mut is_tokens = false;
-
-    let mut tokens = match File::open("token.bin") {
-        Ok(value) => {
-            let mut file = File::open("token.bin").expect("Failed to open tokens.bin");
-            let mut buffer = Vec::new();
-            file.read_to_end(&mut buffer).expect("Reading buffer error");
-            is_tokens = true;
-            SessionInfo::from_bytes(&buffer)?
-        },
-        Err(_) => {log::warn!("No previous session found"); SessionInfo::default()}
-    };
-
-    let request = SessionResumeRequest { 
-        session_id: tokens.session_id, 
-        username: username.clone(), 
-        user_id: tokens.user_id, 
-        access_token: tokens.access_token, 
-        refresh_token: tokens.refresh_token, 
-        scopes: tokens.scopes, 
-        is_waiting_for_second_factor_code: tokens.is_waiting_for_second_factor_code, 
-        password_mode: tokens.password_mode, 
-        options: Some(ProtonClientOptions { 
-            app_version: "macos-drive@1.0.0-alpha.1+proton-sdk-sys".to_string(), 
-            ..Default::default()
-        })
-    };
-
-    let mut session = None;
-
-    if is_tokens {
-        // renew session
-        let session_result = SessionBuilder::resume_session(request, SessionCallbacks {
-            request_response: Some(Box::new(|data| {
-                    let data_str = String::from_utf8_lossy(data);
-                    trace!("HTTP: {} bytes", data.len());
-                    if data.len() < 500 {
-                        trace!("   Content: {}", data_str);
-                    } else {
-                        trace!("   Content (truncated): {}...", &data_str[..200]);
-                    }
-                })),
-            secret_requested: None,
-            tokens_refreshed: Some(Box::new(|data: &[u8]| {
-                let mut file = File::create("tokens.bin").unwrap();
-                file.write_all(data).unwrap();
-                debug!("Overrided tokens in tokens.env");
-            })),
-            two_factor_requested: Some(Box::new(|_closure: &[u8]| {
-                print!("Enter 2FA code: ");
-                io::stdout().flush().ok();
-                let mut code = String::new();
-                if io::stdin().read_line(&mut code).is_ok() {
-                    let code = code.trim();
-                    if !code.is_empty() {
-                        Some(proton_sdk_sys::protobufs::StringResponse {
-                            value: code.to_string(),
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            }))
-        })
-        .await;
-        session = Some(match session_result {
-            Ok(session) => {
-                info!("Session created successfully!");
-                debug!("Session handle: {:?}", session.handle());
-                session
-            }
-            Err(e) => {
-                println!("Failed to create session: {}", e);
-
-                match e {
-                    proton_sdk_rs::sessions::SessionError::SdkError(sdk_err) => {
-                        error!("SDK Error Details: {}", sdk_err);
-                    }
-                    proton_sdk_rs::sessions::SessionError::OperationFailed(code) => {
-                        error!("SDK operation failed with code: {}", code);
-                        match code {
-                            -1 => error!(
-                                "   Possible causes: Invalid credentials, network issues, or SDK not initialized"
-                            ),
-                            401 => println!("   Authentication failed - check username/password"),
-                            403 => println!("   Access forbidden - account may be locked or suspended"),
-                            422 => println!("   Invalid request format"),
-                            _ => println!("   Unknown error code: {}", code),
-                        }
-                    }
-                    proton_sdk_rs::sessions::SessionError::ProtobufError(proto_err) => {
-                        error!("Protobuf Error: {}", proto_err);
-                    }
-                    _ => {
-                        error!("Other error: {}", e);
-                    }
-                }
-                panic!("Failed to create session");
-            }
-        });
-    } else {
-        // create new session
-        let session_result = SessionBuilder::new(username, password)
+    let session_result = SessionBuilder::new(username, password)
         // .with_app_version(SessionPlatform::Windows, "proton-drive-rs", "1.0.0")
         .with_rclone_app_version_spoof()
         .with_request_response_callback(|data| {
@@ -166,52 +63,44 @@ async fn main() -> anyhow::Result<()> {
                 None
             }
         })
-        .with_tokens_refreshed_callback(|data: &[u8]| {
-            // let session = SessionTokens::from_bytes(data).unwrap();
-            let mut file = File::create("token.bin").unwrap();
-            file.write_all(data).unwrap();
-            debug!("Overrided tokens in tokens.env");
-        })
         .begin()
         .await;
-        session = Some(match session_result {
-            Ok(session) => {
-                info!("Session created successfully!");
-                debug!("Session handle: {:?}", session.handle());
-                session
-            }
-            Err(e) => {
-                println!("Failed to create session: {}", e);
 
-                match e {
-                    proton_sdk_rs::sessions::SessionError::SdkError(sdk_err) => {
-                        error!("SDK Error Details: {}", sdk_err);
-                    }
-                    proton_sdk_rs::sessions::SessionError::OperationFailed(code) => {
-                        error!("SDK operation failed with code: {}", code);
-                        match code {
-                            -1 => error!(
-                                "   Possible causes: Invalid credentials, network issues, or SDK not initialized"
-                            ),
-                            401 => println!("   Authentication failed - check username/password"),
-                            403 => println!("   Access forbidden - account may be locked or suspended"),
-                            422 => println!("   Invalid request format"),
-                            _ => println!("   Unknown error code: {}", code),
-                        }
-                    }
-                    proton_sdk_rs::sessions::SessionError::ProtobufError(proto_err) => {
-                        error!("Protobuf Error: {}", proto_err);
-                    }
-                    _ => {
-                        error!("Other error: {}", e);
+    let session = match session_result {
+        Ok(session) => {
+            info!("Session created successfully!");
+            debug!("Session handle: {:?}", session.handle());
+            session
+        }
+        Err(e) => {
+            println!("Failed to create session: {}", e);
+
+            match e {
+                proton_sdk_rs::sessions::SessionError::SdkError(sdk_err) => {
+                    error!("SDK Error Details: {}", sdk_err);
+                }
+                proton_sdk_rs::sessions::SessionError::OperationFailed(code) => {
+                    error!("SDK operation failed with code: {}", code);
+                    match code {
+                        -1 => error!(
+                            "   Possible causes: Invalid credentials, network issues, or SDK not initialized"
+                        ),
+                        401 => println!("   Authentication failed - check username/password"),
+                        403 => println!("   Access forbidden - account may be locked or suspended"),
+                        422 => println!("   Invalid request format"),
+                        _ => println!("   Unknown error code: {}", code),
                     }
                 }
-                panic!("Failed to create session");
+                proton_sdk_rs::sessions::SessionError::ProtobufError(proto_err) => {
+                    error!("Protobuf Error: {}", proto_err);
+                }
+                _ => {
+                    error!("Other error: {}", e);
+                }
             }
-        });
-    }
-
-    let session = session.unwrap();
+            panic!("Failed to create session");
+        }
+    };
 
     info!("Creating observability");
     let obs = OptionalObservability::enabled(session.handle())?;
