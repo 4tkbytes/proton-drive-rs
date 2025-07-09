@@ -4,8 +4,9 @@ use log::{debug, warn};
 use proton_sdk_sys::{
     cancellation::CancellationTokenHandle, data::{AsyncCallback, AsyncCallbackWithProgress, ByteArray}, downloads::{self, raw, DownloaderHandle}, drive::DriveClientHandle, prost::Message, protobufs::{FileDownloadRequest, IntResponse, ToByteArray}
 };
-
+use proton_sdk_sys::protobufs::ProgressUpdate;
 use crate::{cancellation::{self, CancellationToken}, drive::DriveClient};
+use proton_sdk_sys::protobufs::FromByteArray;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DownloadError {
@@ -48,20 +49,6 @@ where
 }
 
 impl Downloader {
-    /// Creates a new downloader for the given Drive client
-    ///
-    /// # Arguments
-    /// * `client` - The Drive client handle
-    /// * `cancellation_token` - Token to cancel the creation if needed
-    ///
-    /// # Returns
-    /// A new Downloader instance or an error if creation failed
-    ///
-    /// # Example
-    /// ```rust
-    /// let token = CancellationToken::new()?;
-    /// let downloader = Downloader::new(drive_client.handle(), &token).await?;
-    /// ```
     pub async fn new(
         client: DriveClientHandle,
         cancellation_token: CancellationTokenHandle,
@@ -183,24 +170,6 @@ impl Downloader {
     ///
     /// # Returns
     /// The downloaded file data as bytes, or an error if download failed
-    ///
-    /// # Example
-    /// ```rust
-    /// let download_request = FileDownloadRequest {
-    ///     file_id: "file_123".to_string(),
-    ///     // ... other fields
-    /// };
-    ///
-    /// let progress_callback = |progress: f32| {
-    ///     println!("Download progress: {:.1}%", progress * 100.0);
-    /// };
-    ///
-    /// let file_data = downloader.download_file(
-    ///     download_request,
-    ///     Some(progress_callback),
-    ///     &cancellation_token
-    /// ).await?;
-    /// ```
     pub async fn download_file<F>(
         &self,
         request: FileDownloadRequest,
@@ -282,17 +251,10 @@ impl Downloader {
                 unsafe {
                     let state_ptr = state as *const CombinedDownloadState<F>;
                     let download_state = &*state_ptr;
-
-                    let progress = if progress_data.length >= 4 {
-                        let data_slice = progress_data.as_slice();
-                        let bytes = [data_slice[0], data_slice[1], data_slice[2], data_slice[3]];
-                        f32::from_le_bytes(bytes)
-                    } else {
-                        0.0
-                    };
-
+                    let bytes = progress_data.as_slice();
+                    let progress = ProgressUpdate::from_bytes(bytes).expect("No progress update data");
                     if let Some(ref callback) = download_state.progress_callback {
-                        callback(progress);
+                        callback((progress.bytes_completed as f32 / progress.bytes_in_total as f32));
                     }
                 }
             }
@@ -337,6 +299,7 @@ impl Downloader {
             )));
         }
 
+        // 5 min timeout
         match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
             Ok(result) => match result {
                 Ok(result) => result,
@@ -411,39 +374,5 @@ impl DownloaderBuilder {
         self
     ) -> Result<Downloader, DownloadError> {
         Downloader::new(self.client, self.token).await
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct DownloadProgress {
-    pub file_id: String,
-    pub bytes_downloaded: u64,
-    pub total_bytes: Option<u64>,
-    pub progress_percentage: f32,
-}
-
-impl DownloadProgress {
-    pub fn new(file_id: String, progress: f32) -> Self {
-        Self {
-            file_id,
-            bytes_downloaded: 0,
-            total_bytes: None,
-            progress_percentage: progress.clamp(0.0, 1.0),
-        }
-    }
-
-    pub fn with_bytes(mut self, downloaded: u64, total: Option<u64>) -> Self {
-        self.bytes_downloaded = downloaded;
-        self.total_bytes = total;
-        if let Some(total) = total {
-            if total > 0 {
-                self.progress_percentage = (downloaded as f32 / total as f32).clamp(0.0, 1.0);
-            }
-        }
-        self
-    }
-
-    pub fn is_complete(&self) -> bool {
-        self.progress_percentage >= 1.0
     }
 }

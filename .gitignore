@@ -8,3 +8,4 @@ Cargo.lock
 local-nuget-repository
 *.bat
 .idea
+/.cfg

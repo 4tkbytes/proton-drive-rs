@@ -9,11 +9,10 @@ use proton_sdk_rs::{
 use proton_sdk_sys::logger;
 use tokio::time::timeout;
 use uuid::Uuid;
-use std::{
-    env,
-    io::{self, Write}, thread, time::Duration,
-};
-use proton_sdk_sys::prost::encoding::check_wire_type;
+use std::{env, fs, io::{self, Write}, thread, time::Duration};
+use std::os::windows::prelude::MetadataExt;
+use proton_sdk_sys::protobufs::{FileUploadRequest, FileUploaderCreationRequest, ShareMetadata};
+use proton_sdk_rs::uploads::UploaderBuilder;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -22,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap();
-        let env_path = workspace_root.join(".env");
+        let env_path = workspace_root.join(".cfg");
         dotenv::from_path(env_path).ok();
     }
 
@@ -43,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(".env")
+            .open(".cfg")
             .unwrap();
         writeln!(file, "PROTON_USERNAME={}", username).unwrap();
 
@@ -60,14 +59,14 @@ async fn main() -> anyhow::Result<()> {
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(".env")
+            .open(".cfg")
             .unwrap();
         writeln!(file, "PROTON_PASSWORD={}", password).unwrap();
 
         password
     });
 
-    let session_result = SessionBuilder::new(username, password)
+    let session_result = SessionBuilder::new(username, password.clone())
         // .with_app_version(SessionPlatform::Windows, "proton-drive-rs", "1.0.0")
         .with_rclone_app_version_spoof()
         .with_request_response_callback(|data| {
@@ -79,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
                 trace!("   Content (truncated): {}...", &data_str[..200]);
             }
         })
-        .with_two_factor_requested_callback(|_context| {
+        .with_two_factor_requested_callback(move |_context| {
             print!("Enter 2FA code: ");
             io::stdout().flush().ok();
             let mut code = String::new();
@@ -100,8 +99,7 @@ async fn main() -> anyhow::Result<()> {
                 Ok("true") => {
                     warn!("Data password not provided, setting as users password");
                     Some(proton_sdk_sys::protobufs::StringResponse {
-                        value: env::var("PROTON_PASSWORD").expect("No password provided \
-                        even though it should be there???"),
+                        value: password.clone(),
                     })
                 }
                 _ => {
@@ -113,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
                         let mut file = OpenOptions::new()
                             .create(true)
                             .append(true)
-                            .open(".env")
+                            .open(".cfg")
                             .unwrap();
                         if !data_pass.is_empty() {
                             writeln!(file, "NO_DATA_PASS=false").ok();
@@ -123,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
                         } else {
                             writeln!(file, "NO_DATA_PASS=true").ok();
                             Some(proton_sdk_sys::protobufs::StringResponse {
-                                value: env::var("PROTON_PASSWORD").expect("tf y no pass???"),
+                                value: password.clone(),
                             })
                         }
                     } else {
@@ -208,7 +206,7 @@ async fn main() -> anyhow::Result<()> {
 
     let share = client.get_shares(main_volume).await?;
 
-    log::trace!("share information: {:?}", share);
+    trace!("share information: {:?}", share);
 
     let identity = NodeIdentity { 
         node_id: share.root_node_id.clone(), 
@@ -216,7 +214,7 @@ async fn main() -> anyhow::Result<()> {
         volume_id: main_volume.volume_id.clone()
     };
 
-    recursive_list_file_root(&client, &identity, "".to_string()).await?;
+    // // recursive_list_file_root(&client, &identity, "".to_string()).await?;
     // let downloader = DownloaderBuilder::new(&client).build().await?;
     //
     // let children = client.get_folder_children(identity.clone()).await?;
@@ -270,6 +268,56 @@ async fn main() -> anyhow::Result<()> {
     //     }
     // }
 
+    // uploading an example file
+    let file = "C:/Users/thrib/Downloads/Headquarters.dll";
+    let metadata = fs::metadata(file)?;
+    let file_size = metadata.file_size();
+
+    let request = FileUploaderCreationRequest {
+        file_size: file_size as i64,
+        number_of_samples: 0,
+    };
+
+    let uploader = UploaderBuilder::new(&client)
+        .with_request(request)
+        .build()
+        .await?;
+
+    let file_path = "C:/Users/thrib/Downloads/Headquarters.dll";
+    let metadata = std::fs::metadata(file_path)?;
+    let file_name = std::path::Path::new(file_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("Headquarters.dll")
+        .to_string();
+
+    let operation = OperationIdentifier {
+        r#type: OperationType::Download.into(),
+        identifier: Uuid::new_v4().to_string(),
+        timestamp: Utc::now().to_rfc3339()
+    };
+
+    let share_metadata = ShareMetadata {
+        share_id: share.share_id.clone(),
+        membership_address_id: share.membership_address_id.clone(),
+        membership_email_address: share.membership_email_address.clone(),
+    };
+
+    let request = FileUploadRequest {
+        share_metadata: Some(share_metadata),
+        parent_folder_identity: Some(identity),
+        name: file_name.clone(),
+        mime_type: mime_guess::from_path(file_path).first_or_octet_stream().to_string(),
+        source_file_path: file_path.to_string(),
+        thumbnail: None,
+        last_modification_date: metadata.modified()?.elapsed()?.as_secs() as i64,
+        operation_id: Some(operation),
+    };
+
+    uploader.upload_file_or_revision(request, Some(move |progress| {
+        info!("Uploading file [{}] at progress: {}", file_name, progress * 100.0);
+    })).await?;
+
     Ok(())
 }
 
@@ -290,7 +338,7 @@ async fn recursive_list_file_root(
                 } else {
                     format!("{}/{}", parent_folder, folder.name)
                 };
-                println!("{}", folder_name);
+                // println!("{}", folder_name);
 
                 let new_identity = {
                     let node_id = folder.node_identity.as_ref()

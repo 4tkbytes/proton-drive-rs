@@ -35,7 +35,7 @@ impl UploaderHandle {
         self.0 == 0
     }
 
-    /// Retuens the raw handle
+    /// Returns the raw handle
     pub fn raw(&self) -> isize {
         self.0
     }
@@ -51,7 +51,7 @@ pub mod raw {
     use crate::{
         data::{AsyncCallback, AsyncCallbackWithProgress, ByteArray, Callback},
         drive::DriveClientHandle,
-        uploader::{self, UploaderHandle},
+        uploads::{self, UploaderHandle},
         ProtonSDKLib,
     };
 

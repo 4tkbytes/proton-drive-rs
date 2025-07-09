@@ -7,7 +7,7 @@ pub mod nodes;
 pub mod observability;
 pub mod protobufs;
 pub mod sessions;
-pub mod uploader;
+pub mod uploads;
 
 use libloading::Library;
 use log::{debug, error, warn};
