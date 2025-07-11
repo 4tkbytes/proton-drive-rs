@@ -558,7 +558,6 @@ class BuildScript:
         # Find and copy .NET binaries from the AOT-compiled CExports project
         sdk_src_dir = self.base_dir / "Proton.SDK" / "src"
         
-        # Determine the runtime identifier based on the current platform
         dotnet_arch = 'x64' if self.arch == 'amd64' else self.arch
         if self.os_name == 'windows':
             runtime_id = f"win-{dotnet_arch}"
@@ -569,8 +568,6 @@ class BuildScript:
         else:
             runtime_id = f"{self.os_name}-{dotnet_arch}"
         
-        # Look for the specific AOT-compiled output directory
-        # First try the publish directory (AOT output)
         aot_publish_dir = sdk_src_dir / "Proton.Sdk.Drive.CExports" / "bin" / "Release" / "net9.0" / runtime_id / "publish"
         aot_output_dir = sdk_src_dir / "Proton.Sdk.Drive.CExports" / "bin" / "Release" / "net9.0" / runtime_id
         
@@ -611,30 +608,12 @@ class BuildScript:
         if source_dir:
             print(f"{Colors.BLUE}Copying AOT-compiled binaries from:{Colors.END} {source_dir}")
             
-            # Create native-libs directory if it doesn't exist
-            # proton-sdk-sys should be directly under base directory, not under proton-sdk-rs
-            proton_sdk_sys_dir = self.base_dir / "proton-sdk-sys"
-            if not proton_sdk_sys_dir.exists():
-                print(f"{Colors.RED}Error: Cannot find proton-sdk-sys directory at {proton_sdk_sys_dir}{Colors.END}")
-                print(f"{Colors.YELLOW}Expected structure: {self.base_dir} should contain both 'proton-sdk-rs' and 'proton-sdk-sys' directories{Colors.END}")
-                return
-            
-            native_libs_dir = proton_sdk_sys_dir / "native-libs"
-            native_libs_dir.mkdir(parents=True, exist_ok=True)
-            
-            print(f"{Colors.CYAN}Creating native-libs at: {native_libs_dir}{Colors.END}")
-            
-            # Copy the runtime folder into native-libs with publish subdirectory
-            runtime_target_dir = native_libs_dir / runtime_id / "publish"
-            
-            # Remove existing contents if they exist
-            if runtime_target_dir.exists():
-                shutil.rmtree(runtime_target_dir)
-            
-            # Copy files excluding .pdb files
-            copied_files = copy_files_excluding_pdb(source_dir, runtime_target_dir)
-            print(f"{Colors.GREEN}Successfully copied {len(copied_files)} files (excluding .pdb) to {runtime_target_dir}{Colors.END}")
-        
+            # Use self.dlls_location for output, matching build_dll_only
+            native_libs_dir = self.dlls_location / runtime_id
+            if native_libs_dir.exists():
+                shutil.rmtree(native_libs_dir)
+            copied_files = copy_files_excluding_pdb(source_dir, native_libs_dir)
+            print(f"{Colors.GREEN}Successfully copied {len(copied_files)} files (excluding .pdb) to {native_libs_dir}{Colors.END}")
         else:
             print(f"{Colors.YELLOW}Warning: AOT output directory not found at {aot_output_dir}{Colors.END}")
             
@@ -648,27 +627,11 @@ class BuildScript:
                 source_net90_dir = net90_dirs[0]  # Take the first match
                 print(f"{Colors.BLUE}Copying .NET binaries from fallback location:{Colors.END} {source_net90_dir}")
                 
-                # Create native-libs directory if it doesn't exist
-                # proton-sdk-sys should be directly under base directory, not under proton-sdk-rs
-                proton_sdk_sys_dir = self.base_dir / "proton-sdk-sys"
-                if not proton_sdk_sys_dir.exists():
-                    print(f"{Colors.RED}Error: Cannot find proton-sdk-sys directory at {proton_sdk_sys_dir}{Colors.END}")
-                    print(f"{Colors.YELLOW}Expected structure: {self.base_dir} should contain both 'proton-sdk-rs' and 'proton-sdk-sys' directories{Colors.END}")
-                    return
-                
-                native_libs_dir = proton_sdk_sys_dir / "native-libs"
-                native_libs_dir.mkdir(parents=True, exist_ok=True)
-                
-                print(f"{Colors.CYAN}Creating native-libs at: {native_libs_dir}{Colors.END}")
-                
-                # Copy as a runtime-specific subdirectory with publish structure
-                runtime_target_dir = native_libs_dir / runtime_id / "publish"
-                if runtime_target_dir.exists():
-                    shutil.rmtree(runtime_target_dir)  # Remove only this specific runtime folder
-                
-                # Copy files excluding .pdb files
-                copied_files = copy_files_excluding_pdb(source_net90_dir, runtime_target_dir)
-                print(f"{Colors.GREEN}Successfully copied {len(copied_files)} files (excluding .pdb) to {runtime_target_dir}{Colors.END}")
+                native_libs_dir = self.dlls_location / runtime_id
+                if native_libs_dir.exists():
+                    shutil.rmtree(native_libs_dir)
+                copied_files = copy_files_excluding_pdb(source_net90_dir, native_libs_dir)
+                print(f"{Colors.GREEN}Successfully copied {len(copied_files)} files (excluding .pdb) to {native_libs_dir}{Colors.END}")
             else:
                 print(f"{Colors.YELLOW}Warning: No net9.0 binaries found{Colors.END}")
     
@@ -888,14 +851,12 @@ class BuildScript:
             print(f"{Colors.RED}Error: No AOT output found{Colors.END}")
             return
         
-        # Create native-libs directory relative to the current working directory
-        # This ensures consistency between local and CI environments
-        current_dir = Path.cwd()
-        native_libs_dir = current_dir / "native-libs" / runtime_id
+        # Use self.dlls_location for output, matching the rest of the build system
+        native_libs_dir = self.dlls_location / runtime_id
         native_libs_dir.mkdir(parents=True, exist_ok=True)
         
         print(f"{Colors.CYAN}Creating native-libs at: {native_libs_dir}{Colors.END}")
-        print(f"{Colors.CYAN}Current working directory: {current_dir}{Colors.END}")
+        print(f"{Colors.CYAN}Base directory: {self.base_dir}{Colors.END}")
         
         # Copy library files (excluding .pdb files)
         copied_files = []

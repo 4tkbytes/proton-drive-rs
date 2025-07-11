@@ -199,12 +199,11 @@ impl SessionBuilder {
         app_version: &str,
     ) -> Self {
         if let Some(ref mut options) = self.request.options {
-            let version = format!("{}-drive-{}@{}", platform, app_name, app_version);
+            let version = format!("external-drive-{}_{}@{}", app_name, platform, app_version);
             options.app_version = version.to_string();
         }
         info!(
-            "App version: {}-drive-{}@{}",
-            platform, app_name, app_version
+            "App version: external-drive-{}_{}@{}", app_name, platform, app_version
         );
         self
     }
@@ -679,9 +678,11 @@ extern "C" fn two_factor_requested_c_callback(
 
 pub enum SessionPlatform {
     Windows,
-    MacOs,
+    #[allow(non_camel_case_types)]
+    macOS,
     Android,
-    Ios,
+    #[allow(non_camel_case_types)]
+    iOS,
     Linux,
 }
 
@@ -689,9 +690,9 @@ impl fmt::Display for SessionPlatform {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SessionPlatform::Windows => write!(f, "windows"),
-            SessionPlatform::MacOs => write!(f, "macos"),
+            SessionPlatform::macOS => write!(f, "macos"),
             SessionPlatform::Android => write!(f, "android"),
-            SessionPlatform::Ios => write!(f, "ios"),
+            SessionPlatform::iOS => write!(f, "ios"),
             SessionPlatform::Linux => write!(f, "linux"),
         }
     }

@@ -1,5 +1,9 @@
-use proton_sdk_sys::data::Callback;
-use std::fs::OpenOptions;
+mod auth;
+mod index;
+
+use r2d2::Pool;
+use proton_sdk_sys::{data::Callback, prost::Message};
+use std::{fs::OpenOptions, sync::{Arc, Mutex}};
 use async_recursion::async_recursion;
 use chrono::Utc;
 use log::*;
@@ -11,166 +15,14 @@ use tokio::time::timeout;
 use uuid::Uuid;
 use std::{env, fs, io::{self, Write}, thread, time::Duration};
 use std::os::windows::prelude::MetadataExt;
+use r2d2_sqlite::{rusqlite::params, SqliteConnectionManager};
 use proton_sdk_sys::protobufs::{FileUploadRequest, FileUploaderCreationRequest, ShareMetadata};
 use proton_sdk_rs::uploads::UploaderBuilder;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-
-    if let Err(_) = dotenv::dotenv() {
-        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap();
-        let env_path = workspace_root.join(".cfg");
-        dotenv::from_path(env_path).ok();
-    }
-
-    if let Ok(log_level) = env::var("RUST_LOG") {
-        env_logger::init_from_env(env_logger::Env::default().default_filter_or(&log_level));
-    } else {
-        env_logger::init();
-        warn!("No RUST_LOG environment variable found. Setting default log level.");
-    }
-
-    let username = env::var("PROTON_USERNAME").unwrap_or_else(|_| {
-        print!("Enter your Proton username: ");
-        io::stdout().flush().unwrap();
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
-        let username = input.trim().to_string();
-
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(".cfg")
-            .unwrap();
-        writeln!(file, "PROTON_USERNAME={}", username).unwrap();
-
-        username
-    });
-
-    let password = env::var("PROTON_PASSWORD").unwrap_or_else(|_| {
-        print!("Enter your Proton password: ");
-        io::stdout().flush().unwrap();
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
-        let password = input.trim().to_string();
-
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(".cfg")
-            .unwrap();
-        writeln!(file, "PROTON_PASSWORD={}", password).unwrap();
-
-        password
-    });
-
-    let session_result = SessionBuilder::new(username, password.clone())
-        // .with_app_version(SessionPlatform::Windows, "proton-drive-rs", "1.0.0")
-        .with_rclone_app_version_spoof()
-        .with_request_response_callback(|data| {
-            let data_str = String::from_utf8_lossy(data);
-            trace!("HTTP: {} bytes", data.len());
-            if data.len() < 500 {
-                trace!("   Content: {}", data_str);
-            } else {
-                trace!("   Content (truncated): {}...", &data_str[..200]);
-            }
-        })
-        .with_two_factor_requested_callback(move |_context| {
-            print!("Enter 2FA code: ");
-            io::stdout().flush().ok();
-            let mut code = String::new();
-            let code_opt = if io::stdin().read_line(&mut code).is_ok() {
-                let code = code.trim();
-                if !code.is_empty() {
-                    Some(proton_sdk_sys::protobufs::StringResponse {
-                        value: code.to_string(),
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            let data_pass_opt = match env::var("NO_DATA_PASS").as_deref() {
-                Ok("true") => {
-                    warn!("Data password not provided, setting as users password");
-                    Some(proton_sdk_sys::protobufs::StringResponse {
-                        value: password.clone(),
-                    })
-                }
-                _ => {
-                    print!("Enter data pass (if any, or leave blank): ");
-                    io::stdout().flush().ok();
-                    let mut data_pass = String::new();
-                    let data_pass_result = if io::stdin().read_line(&mut data_pass).is_ok() {
-                        let data_pass = data_pass.trim();
-                        let mut file = OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open(".cfg")
-                            .unwrap();
-                        if !data_pass.is_empty() {
-                            writeln!(file, "NO_DATA_PASS=false").ok();
-                            Some(proton_sdk_sys::protobufs::StringResponse {
-                                value: data_pass.to_string(),
-                            })
-                        } else {
-                            writeln!(file, "NO_DATA_PASS=true").ok();
-                            Some(proton_sdk_sys::protobufs::StringResponse {
-                                value: password.clone(),
-                            })
-                        }
-                    } else {
-                        None
-                    };
-                    data_pass_result
-                }
-            };
-
-            (code_opt, data_pass_opt)
-        })
-        .begin()
-        .await;
-
-    let session = match session_result {
-        Ok(session) => {
-            info!("Session created successfully!");
-            debug!("Session handle: {:?}", session.handle());
-            session
-        }
-        Err(e) => {
-            println!("Failed to create session: {}", e);
-
-            match e {
-                proton_sdk_rs::sessions::SessionError::SdkError(sdk_err) => {
-                    error!("SDK Error Details: {}", sdk_err);
-                }
-                proton_sdk_rs::sessions::SessionError::OperationFailed(code) => {
-                    error!("SDK operation failed with code: {}", code);
-                    match code {
-                        -1 => error!(
-                            "   Possible causes: Invalid credentials, network issues, or SDK not initialized"
-                        ),
-                        401 => println!("   Authentication failed - check username/password"),
-                        403 => println!("   Access forbidden - account may be locked or suspended"),
-                        422 => println!("   Invalid request format"),
-                        _ => println!("   Unknown error code: {}", code),
-                    }
-                }
-                proton_sdk_rs::sessions::SessionError::ProtobufError(proto_err) => {
-                    error!("Protobuf Error: {}", proto_err);
-                }
-                _ => {
-                    error!("Other error: {}", e);
-                }
-            }
-            panic!("Failed to create session");
-        }
-    };
+    println!("================== Proton Drive (primitive) ==================");
+    let (session, is_first_run, password) = auth::create_new_session().await;
 
     info!("Creating observability");
     let obs = OptionalObservability::enabled(session.handle())?;
@@ -191,22 +43,18 @@ async fn main() -> anyhow::Result<()> {
         .build()
     {
         Ok(cli) => {
-            info!("Drive client created {:?}", cli.handle());
-            cli
+            println!("Drive client successfully created!");
+            debug!("Drive client created {:?}", cli.handle());
+            Arc::new(cli)
         }
         Err(e) => anyhow::bail!(e),
     };
 
     let volumes = client.get_volumes().await?;
-    for volume in &volumes {
-        trace!("volume metadata: {:?}", volume);
-    }
 
     let main_volume = &volumes[0];
 
     let share = client.get_shares(main_volume).await?;
-
-    trace!("share information: {:?}", share);
 
     let identity = NodeIdentity { 
         node_id: share.root_node_id.clone(), 
@@ -214,8 +62,121 @@ async fn main() -> anyhow::Result<()> {
         volume_id: main_volume.volume_id.clone()
     };
 
-    // // recursive_list_file_root(&client, &identity, "".to_string()).await?;
-    // let downloader = DownloaderBuilder::new(&client).build().await?;
+    let manager = SqliteConnectionManager::file("index.db");
+    let pool = Arc::new(Pool::new(manager)?);
+
+    if is_first_run {
+        index::index(&client, &identity, password, &pool).await?;
+        println!("Ding! Initial indexing is done");
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(".cfg")
+            .unwrap();
+        writeln!(file, "INITIAL_INDEX=true").unwrap();
+    } else {
+        println!("No big indexing");
+    }
+
+    // loop {
+    //     update(client.clone(), pool.clone(), 8).await;
+    // }
+
+    Ok(())
+}
+
+async fn update(client: Arc<DriveClient>, pool: Arc<Pool<SqliteConnectionManager>>, number_of_workers: usize) {
+    let folders: Vec<(String, Vec<u8>)> = {
+        let conn = pool.get().unwrap();
+        let mut stmt = conn.prepare("SELECT full_path, node FROM folders").unwrap();
+        stmt.query_map([], |row| {
+            let path: String = row.get(0)?;
+            let node: Vec<u8> = row.get(1)?;
+            Ok((path, node))
+        })
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect()
+    };
+
+    let folder_queue = Arc::new(Mutex::new(folders));
+    let mut handles = vec![];
+
+    for _ in 0..number_of_workers {
+        let queue = Arc::clone(&folder_queue);
+        let client = Arc::clone(&client);
+        let pool = Arc::clone(&pool);
+
+        handles.push(thread::spawn(move || {
+            loop {
+                let (folder_path, node_bytes) = {
+                    let mut q = queue.lock().unwrap();
+                    if q.is_empty() {
+                        break;
+                    }
+                    q.pop().unwrap()
+                };
+
+                let node_identity: NodeIdentity = match NodeIdentity::decode(node_bytes.as_slice()) {
+                    Ok(n) => n,
+                    Err(e) => {
+                        log::error!("Failed to decode node for {}: {:?}", folder_path, e);
+                        continue;
+                    }
+                };
+
+                // Call get_folder_children (sync version)
+                let children = match client.get_folder_children_blocking(node_identity) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        log::error!("Failed to get children for {}: {:?}", folder_path, e);
+                        continue;
+                    }
+                };
+
+                let conn = pool.get().unwrap();
+                for child in children {
+                    let (is_folder, folder) = utils::node_is_folder(child.clone());
+                    let (is_file, file) = utils::node_is_file(child.clone());
+
+                    if is_folder {
+                        let folder_name = folder.as_ref().map(|f| f.name.clone()).unwrap_or_default();
+                        let full_path = format!("{}/{}", folder_path, folder_name);
+                        let mut stmt = conn.prepare("SELECT COUNT(*) FROM folders WHERE full_path = ?1").unwrap();
+                        let exists: i64 = stmt.query_row(params![full_path], |row| row.get(0)).unwrap();
+                        if exists == 0 {
+                            log::info!("New folder detected: {}", full_path);
+                            let node_bytes = folder.unwrap().to_bytes().unwrap();
+                            conn.execute(
+                                "INSERT INTO folders (full_path, folder_name, checked, node) VALUES (?1, ?2, 0, ?3)",
+                                params![full_path, folder_name, node_bytes],
+                            ).unwrap();
+                        }
+                    } else if is_file {
+                        let file_name = file.as_ref().map(|f| f.name.clone()).unwrap_or_default();
+                        let full_path = format!("{}/{}", folder_path, file_name);
+                        let mut stmt = conn.prepare("SELECT COUNT(*) FROM files WHERE full_path = ?1").unwrap();
+                        let exists: i64 = stmt.query_row(params![full_path], |row| row.get(0)).unwrap();
+                        if exists == 0 {
+                            log::info!("New file detected: {}", full_path);
+                            let node_bytes = file.unwrap().to_bytes().unwrap();
+                            conn.execute(
+                                "INSERT INTO files (full_path, file_name, checked, node) VALUES (?1, ?2, 0, ?3)",
+                                params![full_path, file_name, node_bytes],
+                            ).unwrap();
+                        }
+                    }
+                }
+            }
+        }));
+    }
+
+    for h in handles {
+        h.join().unwrap();
+    }
+}
+
+// let downloader = DownloaderBuilder::new(&client).build().await?;
     //
     // let children = client.get_folder_children(identity.clone()).await?;
     // for child in children {
@@ -268,107 +229,53 @@ async fn main() -> anyhow::Result<()> {
     //     }
     // }
 
-    // uploading an example file
-    let file = "C:/Users/thrib/Downloads/Headquarters.dll";
-    let metadata = fs::metadata(file)?;
-    let file_size = metadata.file_size();
-
-    let request = FileUploaderCreationRequest {
-        file_size: file_size as i64,
-        number_of_samples: 0,
-    };
-
-    let uploader = UploaderBuilder::new(&client)
-        .with_request(request)
-        .build()
-        .await?;
-
-    let file_path = "C:/Users/thrib/Downloads/Headquarters.dll";
-    let metadata = std::fs::metadata(file_path)?;
-    let file_name = std::path::Path::new(file_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("Headquarters.dll")
-        .to_string();
-
-    let operation = OperationIdentifier {
-        r#type: OperationType::Download.into(),
-        identifier: Uuid::new_v4().to_string(),
-        timestamp: Utc::now().to_rfc3339()
-    };
-
-    let share_metadata = ShareMetadata {
-        share_id: share.share_id.clone(),
-        membership_address_id: share.membership_address_id.clone(),
-        membership_email_address: share.membership_email_address.clone(),
-    };
-
-    let request = FileUploadRequest {
-        share_metadata: Some(share_metadata),
-        parent_folder_identity: Some(identity),
-        name: file_name.clone(),
-        mime_type: mime_guess::from_path(file_path).first_or_octet_stream().to_string(),
-        source_file_path: file_path.to_string(),
-        thumbnail: None,
-        last_modification_date: metadata.modified()?.elapsed()?.as_secs() as i64,
-        operation_id: Some(operation),
-    };
-
-    uploader.upload_file_or_revision(request, Some(move |progress| {
-        info!("Uploading file [{}] at progress: {}", file_name, progress * 100.0);
-    })).await?;
-
-    Ok(())
-}
-
-#[async_recursion]
-async fn recursive_list_file_root(
-    client: &DriveClient,
-    identity: &NodeIdentity,
-    parent_folder: String,
-) -> anyhow::Result<()> {
-    let children = client.get_folder_children(identity.clone()).await?;
-
-    for child in children {
-        let (is_folder, folder) = utils::node_is_folder(child.clone());
-        if is_folder {
-            if let Some(folder) = folder {
-                let folder_name = if parent_folder.is_empty() {
-                    folder.name.clone()
-                } else {
-                    format!("{}/{}", parent_folder, folder.name)
-                };
-                // println!("{}", folder_name);
-
-                let new_identity = {
-                    let node_id = folder.node_identity.as_ref()
-                        .and_then(|ni| ni.node_id.clone())
-                        .or_else(|| identity.node_id.clone());
-                    let share_id = folder.node_identity.as_ref()
-                        .and_then(|ni| ni.share_id.clone())
-                        .or_else(|| identity.share_id.clone());
-                    let volume_id = folder.node_identity.as_ref()
-                        .and_then(|ni| ni.volume_id.clone())
-                        .or_else(|| identity.volume_id.clone());
-                    NodeIdentity { node_id, share_id, volume_id }
-                };
-
-                recursive_list_file_root(client, &new_identity, folder_name).await?;
-            }
-        } else {
-            let (is_file, file) = utils::node_is_file(child);
-            if is_file {
-                if let Some(file) = file {
-                    let file_name = if parent_folder.is_empty() {
-                        file.name.clone()
-                    } else {
-                        format!("{}/{}", parent_folder, file.name)
-                    };
-                    println!("{}", file_name);
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
+    // // uploading an example file
+    // const FILE: &'static str = "C:/Users/thrib/Downloads/protobuf-31.1.zip";
+    // let metadata = fs::metadata(FILE)?;
+    // let file_size = metadata.file_size();
+    //
+    // let request = FileUploaderCreationRequest {
+    //     file_size: file_size as i64,
+    //     number_of_samples: 0,
+    // };
+    //
+    // let uploader = UploaderBuilder::new(&client)
+    //     .with_request(request)
+    //     .build()
+    //     .await?;
+    //
+    // let metadata = fs::metadata(FILE)?;
+    // let file_name = std::path::Path::new(FILE)
+    //     .file_name()
+    //     .and_then(|n| n.to_str())
+    //     .unwrap_or("protobuf-31.1.zip")
+    //     .to_string();
+    //
+    // let operation = OperationIdentifier {
+    //     r#type: OperationType::Download.into(),
+    //     identifier: Uuid::new_v4().to_string(),
+    //     timestamp: Utc::now().to_rfc3339()
+    // };
+    //
+    // let share_metadata = ShareMetadata {
+    //     share_id: share.share_id.clone(),
+    //     membership_address_id: share.membership_address_id.clone(),
+    //     membership_email_address: share.membership_email_address.clone(),
+    // };
+    // let modified = metadata.modified()?;
+    // let last_modification_date = modified.duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+    //
+    // let request = FileUploadRequest {
+    //     share_metadata: Some(share_metadata),
+    //     parent_folder_identity: Some(identity),
+    //     name: file_name.clone(),
+    //     mime_type: mime_guess::from_path(FILE).first_or_octet_stream().to_string(),
+    //     source_file_path: FILE.to_string(),
+    //     thumbnail: None,
+    //     last_modification_date,
+    //     operation_id: Some(operation),
+    // };
+    //
+    // uploader.upload_file_or_revision(request, Some(move |progress| {
+    //     info!("Uploading file [{}] at progress: {}", file_name, progress * 100.0);
+    // })).await?;

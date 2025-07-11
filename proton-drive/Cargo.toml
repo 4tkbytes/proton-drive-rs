@@ -16,3 +16,6 @@ async-recursion = "1.1.1"
 uuid = { version = "1.17", features = ["v4"] }
 chrono = "0.4"
 mime_guess = "2.0.5"
+r2d2 = "0.8.10"
+r2d2_sqlite = "0.30.0"
+rpassword = "7.4.0"
