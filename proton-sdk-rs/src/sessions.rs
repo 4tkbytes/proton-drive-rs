@@ -1,15 +1,12 @@
 use std::{
-    ffi::c_void,
-    fmt,
-    sync::{Arc, Mutex},
+    ffi::c_void, fmt, fs::File, io::Write, sync::{Arc, Mutex}
 };
 
 use log::{debug, error, info, trace, warn};
 use proton_sdk_sys::{
     data::{AsyncCallback, BooleanCallback, ByteArray, Callback},
     protobufs::{
-        AddressKeyRegistrationRequest, ProtonClientOptions, SessionBeginRequest,
-        SessionRenewRequest, SessionResumeRequest, ToByteArray,
+        AddressKeyRegistrationRequest, ProtonClientOptions, SessionBeginRequest, SessionId, SessionRenewRequest, SessionResumeRequest, ToByteArray
     },
     sessions::{self, SessionHandle},
 };
@@ -22,7 +19,7 @@ pub enum SessionError {
     #[error("SDK error: {0}")]
     SdkError(#[from] anyhow::Error),
 
-    #[error("Session operation failed")]
+    #[error("Session operation failed: {0}")]
     OperationFailed(i32),
 
     #[error("Protobuf error: {0}")]
@@ -151,6 +148,32 @@ impl Session {
         Ok(session)
     }
 
+    // TODO: Work on docs
+    /// Saves the session to a specific path (specified) or to session_info.bin by default. 
+    /// It specifically saves the file as a byte vector (as to why its a .bin) for security and just 
+    /// for the shits and giggles. 
+    /// 
+    /// It also overwrites the path if the file exists to make life easier (depends on whom). 
+    /// 
+    /// If you prefer to fetch the information, there is always [`Session::info()`] which returns a 
+    /// SessionInfo struct. 
+    /// 
+    /// # Parameters
+    /// * `path` - A string to the path. Wrap in an option to specify a custom path or leave it as [`None`] 
+    /// to use the default path (which is "session_info.bin")
+    /// 
+    /// # Returns
+    /// Returns an [`anyhow::Result`]
+    pub fn save_session(&self, path: Option<&str>) -> anyhow::Result<()> {
+        let path = path.unwrap_or("session_info.bin");
+        let info = self.info()?;
+        let info_bytes = info.to_bytes()?.to_vec();
+        let mut file = File::create("session_info.bin")
+            .map_err(|e| anyhow::anyhow!("Failed to write to {:?} due to error: {}", path, e))?;
+        file.write_all(&info_bytes)?;
+        Ok(())
+    }
+
     /// Ends the session ~~in an async way (breaks func)~~
     pub fn end(&self) -> Result<(), SessionError> {
         if self.handle.is_null() {
@@ -172,6 +195,33 @@ impl Session {
                 }
             }
         }
+    }
+
+    pub fn apply_data_password(
+        &self,
+        password: &str,
+    ) -> Result<(), SessionError> {
+        if self.handle.is_null() {
+            return Err(SessionError::NullHandle);
+        }
+
+        let string_response = StringResponse {
+            value: password.to_string(),
+        };
+        let proto_buf = string_response.to_proto_buffer()?;
+        let byte_array = proto_buf.as_byte_array();
+
+        let result = sessions::raw::session_apply_data_password(
+            self.handle,
+            byte_array,
+            self.cancellation_token().handle(),
+        )?;
+
+        if result != 0 {
+            return Err(SessionError::OperationFailed(result));
+        }
+
+        Ok(())
     }
 
     pub fn cancellation_token(&self) -> &CancellationToken {
@@ -234,6 +284,7 @@ impl SessionBuilder {
         self
     }
 
+    #[deprecated(since="0.1.0", note="I have figured out how to use custom app versioning, so no need for this function anymore. Please use `with_app_version` instead!")]
     pub fn with_rclone_app_version_spoof(mut self) -> Self {
         if let Some(ref mut options) = self.request.options {
             options.app_version = "macos-drive@1.0.0-alpha.1+proton-sdk-sys".to_string();
@@ -422,9 +473,27 @@ impl SessionBuilder {
 
     // Resumes an existing session
     pub async fn resume_session(
-        request: SessionResumeRequest,
+        mut request: SessionResumeRequest,
         callbacks: SessionCallbacks,
+        platform: SessionPlatform,
+        app_name: &str,
+        app_version: &str,
+        // password: String,
     ) -> Result<Session, SessionError> {
+        if let Some(ref mut options) = request.options {
+            let version = format!("external-drive-{}_{}@{}", app_name, platform, app_version);
+            options.app_version = version.to_string();
+        } else {
+            let version = format!("external-drive-{}_{}@{}", app_name, platform, app_version);
+            request.options = Some(ProtonClientOptions {
+                app_version: version,
+                ..Default::default()
+            });
+        }
+        info!(
+            "App version: external-drive-{}_{}@{}", app_name, platform, app_version
+        );
+        
         let proto_buf = request.to_proto_buffer()?;
 
         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -458,11 +527,15 @@ impl SessionBuilder {
                 return Err(SessionError::OperationFailed(result));
             }
 
-            Ok(Session {
+            let return_val = Session {
                 handle: session_handle,
                 _callback_data: Some(callback_data),
                 cancellation_token,
-            })
+            };
+
+            // return_val.apply_data_password(password.as_str())?;
+
+            Ok(return_val)
         }
     }
 

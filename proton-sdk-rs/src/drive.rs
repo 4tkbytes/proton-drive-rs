@@ -1,6 +1,6 @@
 use std::{ffi::c_void, fmt, future::Future};
 
-use log::{debug, error, warn};
+use log::{debug, error, trace, warn};
 use proton_sdk_sys::{
     cancellation, data::ByteArray, drive::{self, DriveClientHandle}, observability::{self, ObservabilityHandle}, protobufs::{
         NodeIdentity, NodeKeysRegistrationRequest, NodeType, NodeTypeList, ProtonDriveClientCreateRequest, Share, ShareKeyRegistrationRequest, ToByteArray, VolumeEventType, VolumeMetadata, VolumesResponse
@@ -209,7 +209,8 @@ impl DriveClient {
                 Ok(value) => value,
                 Err(error) => return Err(DriveError::ProtobufError(error.into()))
             };
-
+        
+        trace!("Success fetching volumes!");
         Ok(response.volumes)
     }
 
@@ -281,30 +282,6 @@ impl DriveClient {
     pub fn get_folder_children_blocking(&self, node_identity: NodeIdentity) -> Result<Vec<NodeType>, DriveError> {
         let rt = tokio::runtime::Runtime::new().map_err(|e| DriveError::NodeError(anyhow::anyhow!(e)))?;
         rt.block_on(self.get_folder_children(node_identity))
-    }
-
-    /// This function fetches the new folder updates, and on 
-    /// update it runs an async callback (made by you). 
-    /// 
-    /// The function assumes you are using sqlite3 for locally caching directories. 
-    /// If not, I'm fingers crossing that you are using another database and not storing 
-    /// everything in a vector in memory like an idiot. 
-    /// 
-    /// # Parameters
-    /// * `number_of_workers` - the amount of threads created for checking the state of the folders. 
-    /// If set to none, there are 8 workers by default, otherwise it is what you set it.
-    /// * `callback` - an async function that runs when there is an update
-    pub async fn update<F, Fut>(
-        &self, 
-        number_of_workers: Option<u8>, 
-        pool: &Pool<SqliteConnectionManager>,
-        callback: F
-    ) -> anyhow::Result<()>
-    where 
-        F: Fn(NodeType) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = anyhow::Result<()>> + Send,
-    {
-        Ok(())
     }
 
     /// Manually frees up the Proton Drive client handles in memory

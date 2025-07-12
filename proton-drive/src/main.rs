@@ -3,7 +3,7 @@ mod index;
 
 use r2d2::Pool;
 use proton_sdk_sys::{data::Callback, prost::Message};
-use std::{fs::OpenOptions, sync::{Arc, Mutex}};
+use std::{fs::{File, OpenOptions}, sync::{Arc, Mutex}};
 use async_recursion::async_recursion;
 use chrono::Utc;
 use log::*;
@@ -23,7 +23,8 @@ use proton_sdk_rs::uploads::UploaderBuilder;
 async fn main() -> anyhow::Result<()> {
     println!("================== Proton Drive (primitive) ==================");
     let (session, is_first_run, password) = auth::create_new_session().await;
-    let info = session.info()?;
+
+    session.save_session(None)?;
 
     info!("Creating observability");
     let obs = OptionalObservability::enabled(session.handle())?;
@@ -79,9 +80,9 @@ async fn main() -> anyhow::Result<()> {
         println!("No big indexing");
     }
 
-    // loop {
-    //     update(client.clone(), pool.clone(), 8).await;
-    // }
+    loop {
+        update(client.clone(), pool.clone(), 8).await;
+    }
 
     Ok(())
 }

@@ -10,3 +10,4 @@ local-nuget-repository
 .idea
 /.cfg
 *.db
+*.bin

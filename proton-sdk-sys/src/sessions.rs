@@ -25,7 +25,7 @@ impl From<isize> for SessionHandle {
 }
 
 pub mod raw {
-    use crate::{cancellation::CancellationTokenHandle, data::*, protobufs::{FromByteArray, SessionInfo}, ProtonSDKLib};
+    use crate::{cancellation::{self, CancellationTokenHandle}, data::*, protobufs::{FromByteArray, SessionInfo}, ProtonSDKLib};
 
     use super::*;
 
@@ -277,6 +277,14 @@ pub mod raw {
         }
     }
 
+    /// Fetches the session info such as related tokens. 
+    /// 
+    /// # Parameters
+    /// * `session_handle` - The handle to the session
+    /// * `cancellation_token` - Cancellation token
+    /// 
+    /// # Returns
+    /// The `SessionInfo` protobuf
     pub fn session_get_info(session_handle: SessionHandle, cancellation_token: CancellationTokenHandle) -> anyhow::Result<crate::protobufs::SessionInfo> {
         unsafe {
             let sdk = ProtonSDKLib::instance()?;
@@ -293,6 +301,28 @@ pub mod raw {
             let info = SessionInfo::from_byte_array(&out_bytes)?;
 
             Ok(info)
+        }
+    }
+
+    pub fn session_apply_data_password(
+        session_handle: SessionHandle,
+        password: ByteArray,
+        cancellation_token: CancellationTokenHandle
+    ) -> anyhow::Result<i32> {
+        unsafe {
+            let sdk = ProtonSDKLib::instance()?;
+
+            let apply_data_password_fn: libloading::Symbol<
+                unsafe extern "C" fn(isize, ByteArray, isize) -> i32
+            > = sdk.sdk_library.get(b"session_apply_data_password")?;
+
+            let result = apply_data_password_fn(
+                session_handle.raw(),
+                password,
+                cancellation_token.raw(),
+            );
+
+            Ok(result)
         }
     }
 }
