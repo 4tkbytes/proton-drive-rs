@@ -266,10 +266,6 @@ message NodeNameDecryptionRequest {
     optional string signature_email_address = 3;
 }
 
-// ============================================ //
-//                  PATCH
-// ============================================ //
-
 message VolumeMetadata {
     VolumeId volume_id = 1;
     VolumeState state = 2;

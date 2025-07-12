@@ -15,6 +15,7 @@ use proton_sdk_sys::{
 };
 use proton_sdk_sys::protobufs::StringResponse;
 use crate::cancellation::CancellationToken;
+use proton_sdk_sys::protobufs::SessionInfo;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -126,6 +127,30 @@ impl Session {
         Ok(())
     }
 
+    pub fn info(&self) -> anyhow::Result<SessionInfo> {
+        let session = sessions::raw::session_get_info(
+            self.handle(), 
+            self.cancellation_token().handle()
+        ).map_err(|e| SessionError::SdkError(e))?;
+        
+        #[cfg(debug_assertions)]
+        {
+            trace!("SessionId: {:?}", session.session_id);
+            trace!("Username: {}", session.username);
+            trace!("UserID: {:?}", session.user_id);
+            trace!("Access Token: {:?}", session.access_token);
+            trace!("Refresh Token: {:?}", session.refresh_token);
+            trace!("Scopes: ");
+            for scope in &session.scopes {
+                trace!("    {:?}", scope);
+            }
+            trace!("Is waiting for second factor code: {}", session.is_waiting_for_second_factor_code);
+            trace!("Password mode: {}", session.password_mode().as_str_name());
+        }
+
+        Ok(session)
+    }
+
     /// Ends the session ~~in an async way (breaks func)~~
     pub fn end(&self) -> Result<(), SessionError> {
         if self.handle.is_null() {
@@ -158,6 +183,7 @@ impl Drop for Session {
     fn drop(&mut self) {
         if !self.handle.is_null() {
             unsafe {
+                // todo: save the token information and write to a file before discarding session
                 let _ = sessions::raw::session_free(self.handle);
             }
         }

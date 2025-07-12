@@ -25,7 +25,7 @@ impl From<isize> for SessionHandle {
 }
 
 pub mod raw {
-    use crate::{data::*, ProtonSDKLib};
+    use crate::{cancellation::CancellationTokenHandle, data::*, protobufs::{FromByteArray, SessionInfo}, ProtonSDKLib};
 
     use super::*;
 
@@ -274,6 +274,25 @@ pub mod raw {
             let result = register_keys_fn(session_handle.raw(), request);
 
             Ok(result)
+        }
+    }
+
+    pub fn session_get_info(session_handle: SessionHandle, cancellation_token: CancellationTokenHandle) -> anyhow::Result<crate::protobufs::SessionInfo> {
+        unsafe {
+            let sdk = ProtonSDKLib::instance()?;
+            let session_get_info_fn: libloading::Symbol<
+                unsafe extern "C" fn(isize, isize, *mut ByteArray) -> i32,
+            > = sdk.sdk_library.get(b"session_get_info")?;
+
+            let mut out_bytes = ByteArray::empty();
+            let result = session_get_info_fn(session_handle.raw(), cancellation_token.raw(), &mut out_bytes as *mut _);
+            if result != 0 {
+                anyhow::bail!("session_get_info failed with code {}", result);
+            }
+
+            let info = SessionInfo::from_byte_array(&out_bytes)?;
+
+            Ok(info)
         }
     }
 }

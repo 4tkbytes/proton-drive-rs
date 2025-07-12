@@ -23,6 +23,7 @@ use proton_sdk_rs::uploads::UploaderBuilder;
 async fn main() -> anyhow::Result<()> {
     println!("================== Proton Drive (primitive) ==================");
     let (session, is_first_run, password) = auth::create_new_session().await;
+    let info = session.info()?;
 
     info!("Creating observability");
     let obs = OptionalObservability::enabled(session.handle())?;
