@@ -3,6 +3,8 @@
 Build script for proton-sdk-rs and its dependencies.
 This script automates the process of cloning repositories, building dotnet-crypto,
 building Proton.SDK, and finally building proton-sdk-rs.
+
+Note: Yes ONLY this python build script is AI HOWEVER, everything else is handmade with blood sweat and tears. Just know that before you accuse me of something
 """
 
 import os
